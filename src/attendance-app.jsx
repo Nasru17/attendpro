@@ -666,25 +666,60 @@ function useToast() {
 // ============================================================
 // AUTH
 // ============================================================
-const USERS = {
-  "hr@alithomv.com":   { password: "Al1th0",     role: "manager",    name: "HR Manager",  initials: "HR" },
-  "info@alithomv.com": { password: "Al1th0@121", role: "supervisor", name: "Supervisor",  initials: "SV" },
+// Role mapping — email → role/name/initials
+const USER_ROLES = {
+  "hr@alithomv.com":   { role: "manager",    name: "HR Manager", initials: "HR" },
+  "info@alithomv.com": { role: "supervisor", name: "Supervisor", initials: "SV" },
 };
+
+// Supabase Auth helpers
+async function sbSignIn(email, password) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY },
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_description || data.msg || "Invalid email or password.");
+  return data; // { access_token, user, ... }
+}
+
+async function sbSignOut(token) {
+  await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+    method: "POST",
+    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}` }
+  });
+}
+
+async function sbGetUser(token) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}` }
+  });
+  if (!res.ok) return null;
+  return await res.json();
+}
 
 function LoginPage({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
 
-  const handleLogin = () => {
-    const u = USERS[email.toLowerCase().trim()];
-    if (!u || u.password !== password) {
-      setError("Invalid email or password.");
-      return;
+  const handleLogin = async () => {
+    const trimmedEmail = email.toLowerCase().trim();
+    if (!trimmedEmail || !password) { setError("Please enter your email and password."); return; }
+    if (!USER_ROLES[trimmedEmail]) { setError("Invalid email or password."); return; }
+    setLoading(true); setError("");
+    try {
+      const data = await sbSignIn(trimmedEmail, password);
+      const roleInfo = USER_ROLES[trimmedEmail];
+      onLogin({ email: trimmedEmail, token: data.access_token, ...roleInfo });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
     }
-    setError("");
-    onLogin({ email: email.toLowerCase().trim(), ...u });
   };
 
   return (
@@ -706,7 +741,9 @@ function LoginPage({ onLogin }) {
             <button onClick={() => setShowPass(p => !p)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 14 }}>{showPass ? "🙈" : "👁"}</button>
           </div>
         </div>
-        <button className="btn btn-primary login-btn" onClick={handleLogin}>Sign In →</button>
+        <button className="btn btn-primary login-btn" onClick={handleLogin} disabled={loading}>
+          {loading ? "Signing in…" : "Sign In →"}
+        </button>
       </div>
     </div>
   );
@@ -2558,16 +2595,31 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [e, s, a, r, d, u, o] = await Promise.all([
+      // Verify saved session token with Supabase
+      const savedSession = localStorage.getItem("att:session");
+      if (savedSession) {
+        try {
+          const session = JSON.parse(savedSession);
+          const sbUser = await sbGetUser(session.token);
+          if (sbUser) {
+            setUser(session); // token still valid
+          } else {
+            localStorage.removeItem("att:session"); // token expired
+          }
+        } catch {
+          localStorage.removeItem("att:session");
+        }
+      }
+      // Load app data from Supabase
+      const [e, s, a, r, d, o] = await Promise.all([
         load(KEYS.employees), load(KEYS.sites), load(KEYS.attendance),
-        load(KEYS.rosters), load(KEYS.deductions), load("att:session"), load(KEYS.ot)
+        load(KEYS.rosters), load(KEYS.deductions), load(KEYS.ot)
       ]);
       if (e) setEmployees(e);
       if (s) setSites(s);
       if (a) setAttendance(a);
       if (r) setRosters(r);
       if (d) setDeductions(d);
-      if (u) setUser(u);
       if (o) setOt(o);
       setLoaded(true);
     })();
@@ -2580,8 +2632,17 @@ export default function App() {
   useEffect(() => { if (loaded) save(KEYS.deductions, deductions); }, [deductions, loaded]);
   useEffect(() => { if (loaded) save(KEYS.ot, ot); }, [ot, loaded]);
 
-  const handleLogin = (u) => { save("att:session", u); setUser(u); };
-  const handleLogout = () => { save("att:session", null); setUser(null); setPage("dashboard"); };
+  const handleLogin = (u) => {
+    localStorage.setItem("att:session", JSON.stringify(u));
+    setUser(u);
+  };
+
+  const handleLogout = async () => {
+    if (user?.token) await sbSignOut(user.token);
+    localStorage.removeItem("att:session");
+    setUser(null);
+    setPage("dashboard");
+  };
 
   if (!loaded) return (
     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", background:"#0a0e1a", color:"#3b82f6", fontFamily:"Sora,sans-serif", fontSize:16 }}>
