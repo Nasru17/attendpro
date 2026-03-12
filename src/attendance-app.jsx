@@ -303,14 +303,29 @@ const KEYS = {
   ot: "att:ot",
 };
 
-function load(key) {
+// ============================================================
+// SUPABASE STORAGE
+// ============================================================
+const SUPABASE_URL = "https://zsnbpdcecdkadrfdhouq.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpzbmJwZGNlY2RrYWRyZmRob3VxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMjk1NzgsImV4cCI6MjA4ODkwNTU3OH0.1RcfhcSXY4UrU3jD-7dybjPx3bP9RMtKczsFBKJK9Rc";
+const SB_HEADERS = { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` };
+
+async function load(key) {
   try {
-    const val = localStorage.getItem(key);
-    return val ? JSON.parse(val) : null;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/attendpro_store?key=eq.${key}&select=value`, { headers: SB_HEADERS });
+    const rows = await res.json();
+    return rows?.[0]?.value ?? null;
   } catch { return null; }
 }
-function save(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+
+async function save(key, val) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/attendpro_store`, {
+      method: "POST",
+      headers: { ...SB_HEADERS, "Prefer": "resolution=merge-duplicates" },
+      body: JSON.stringify({ key, value: val, updated_at: new Date().toISOString() })
+    });
+  } catch {}
 }
 
 // ============================================================
@@ -2542,21 +2557,20 @@ export default function App() {
   const { toasts, toast } = useToast();
 
   useEffect(() => {
-    const e = load(KEYS.employees);
-    const s = load(KEYS.sites);
-    const a = load(KEYS.attendance);
-    const r = load(KEYS.rosters);
-    const d = load(KEYS.deductions);
-    const u = load("att:session");
-    const o = load(KEYS.ot);
-    if (e) setEmployees(e);
-    if (s) setSites(s);
-    if (a) setAttendance(a);
-    if (r) setRosters(r);
-    if (d) setDeductions(d);
-    if (u) setUser(u);
-    if (o) setOt(o);
-    setLoaded(true);
+    (async () => {
+      const [e, s, a, r, d, u, o] = await Promise.all([
+        load(KEYS.employees), load(KEYS.sites), load(KEYS.attendance),
+        load(KEYS.rosters), load(KEYS.deductions), load("att:session"), load(KEYS.ot)
+      ]);
+      if (e) setEmployees(e);
+      if (s) setSites(s);
+      if (a) setAttendance(a);
+      if (r) setRosters(r);
+      if (d) setDeductions(d);
+      if (u) setUser(u);
+      if (o) setOt(o);
+      setLoaded(true);
+    })();
   }, []);
 
   useEffect(() => { if (loaded) save(KEYS.employees, employees); }, [employees, loaded]);
@@ -2566,8 +2580,8 @@ export default function App() {
   useEffect(() => { if (loaded) save(KEYS.deductions, deductions); }, [deductions, loaded]);
   useEffect(() => { if (loaded) save(KEYS.ot, ot); }, [ot, loaded]);
 
-  const handleLogin = (u) => { setUser(u); save("att:session", u); };
-  const handleLogout = () => { setUser(null); save("att:session", null); setPage("dashboard"); };
+  const handleLogin = (u) => { save("att:session", u); setUser(u); };
+  const handleLogout = () => { save("att:session", null); setUser(null); setPage("dashboard"); };
 
   if (!loaded) return (
     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", background:"#0a0e1a", color:"#3b82f6", fontFamily:"Sora,sans-serif", fontSize:16 }}>
