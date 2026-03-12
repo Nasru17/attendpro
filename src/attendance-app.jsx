@@ -303,14 +303,14 @@ const KEYS = {
   ot: "att:ot",
 };
 
-async function load(key) {
+function load(key) {
   try {
-    const r = await window.storage.get(key);
-    return r ? JSON.parse(r.value) : null;
+    const val = localStorage.getItem(key);
+    return val ? JSON.parse(val) : null;
   } catch { return null; }
 }
-async function save(key, val) {
-  try { await window.storage.set(key, JSON.stringify(val)); } catch {}
+function save(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
 }
 
 // ============================================================
@@ -2542,20 +2542,21 @@ export default function App() {
   const { toasts, toast } = useToast();
 
   useEffect(() => {
-    (async () => {
-      const [e, s, a, r, d, u, o] = await Promise.all([
-        load(KEYS.employees), load(KEYS.sites), load(KEYS.attendance),
-        load(KEYS.rosters), load(KEYS.deductions), load("att:session"), load(KEYS.ot)
-      ]);
-      if (e) setEmployees(e);
-      if (s) setSites(s);
-      if (a) setAttendance(a);
-      if (r) setRosters(r);
-      if (d) setDeductions(d);
-      if (u) setUser(u);
-      if (o) setOt(o);
-      setLoaded(true);
-    })();
+    const e = load(KEYS.employees);
+    const s = load(KEYS.sites);
+    const a = load(KEYS.attendance);
+    const r = load(KEYS.rosters);
+    const d = load(KEYS.deductions);
+    const u = load("att:session");
+    const o = load(KEYS.ot);
+    if (e) setEmployees(e);
+    if (s) setSites(s);
+    if (a) setAttendance(a);
+    if (r) setRosters(r);
+    if (d) setDeductions(d);
+    if (u) setUser(u);
+    if (o) setOt(o);
+    setLoaded(true);
   }, []);
 
   useEffect(() => { if (loaded) save(KEYS.employees, employees); }, [employees, loaded]);
