@@ -755,7 +755,14 @@ const EMPTY_EMP = {
   basicSalary: "", attendanceAllowance: "", accommodationAllowance: "",
   foodAllowance: "", phoneAllowance: "",
   otRate: 20, concreteOT: 200, cementOT: 100, teaRate: 10,
-  joinDate: "",
+  joinDate: "", empStatus: "active", statusDate: "", statusNote: "",
+};
+
+const EMP_STATUS_META = {
+  active:  { label: "Active",   badge: "badge-green",  color: "#10b981", icon: "✓" },
+  leave:   { label: "On Leave", badge: "badge-yellow", color: "#f59e0b", icon: "🏖" },
+  fled:    { label: "Fled",     badge: "badge-red",    color: "#ef4444", icon: "🚨" },
+  resigned:{ label: "Resigned", badge: "badge-gray",   color: "#94a3b8", icon: "✗" },
 };
 
 function EmployeeModal({ emp, onSave, onClose }) {
@@ -839,6 +846,28 @@ function EmployeeModal({ emp, onSave, onClose }) {
               </div>
             </div>
           </div>
+
+          <div className="form-section">
+            <div className="form-section-title">Employment Status</div>
+            <div className="form-grid form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Status</label>
+                <select className="form-select" value={form.empStatus || "active"} onChange={e => set("empStatus", e.target.value)}>
+                  {Object.entries(EMP_STATUS_META).map(([k, v]) => (
+                    <option key={k} value={k}>{v.icon} {v.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Status Date</label>
+                <input className="form-input" type="date" value={form.statusDate || ""} onChange={e => set("statusDate", e.target.value)} />
+              </div>
+              <div className="form-group" style={{ gridColumn: "1 / -1" }}>
+                <label className="form-label">Notes</label>
+                <input className="form-input" value={form.statusNote || ""} onChange={e => set("statusNote", e.target.value)} placeholder="e.g. Returned to home country, expected back 01 May" />
+              </div>
+            </div>
+          </div>
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
@@ -870,8 +899,10 @@ function Dashboard({ employees, sites, attendance, rosters }) {
     <div>
       <div className="stats-grid">
         <div className="stat-card">
-          <div className="stat-label">Total Employees</div>
-          <div className="stat-value blue">{employees.length}</div>
+          <div className="stat-label">Active Employees</div>
+          <div className="stat-value blue">{employees.filter(e => (e.empStatus||"active") === "active").length}</div>
+          {employees.filter(e => (e.empStatus||"active") !== "active").length > 0 &&
+            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>{employees.filter(e => (e.empStatus||"active") !== "active").length} inactive</div>}
         </div>
         <div className="stat-card">
           <div className="stat-label">Work Sites</div>
@@ -1003,13 +1034,44 @@ function SitesPage({ sites, setSites, toast }) {
 function EmployeesPage({ employees, setEmployees, toast }) {
   const [modal, setModal] = useState(null);
   const [filter, setFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [quickStatus, setQuickStatus] = useState(null); // { emp, newStatus }
 
-  const filtered = employees.filter(e =>
-    e.name.toLowerCase().includes(filter.toLowerCase()) || e.empId.toLowerCase().includes(filter.toLowerCase())
-  );
+  const filtered = employees.filter(e => {
+    const matchText = e.name.toLowerCase().includes(filter.toLowerCase()) || e.empId.toLowerCase().includes(filter.toLowerCase());
+    const matchStatus = statusFilter === "all" || (e.empStatus || "active") === statusFilter;
+    return matchText && matchStatus;
+  });
+
+  const counts = { all: employees.length };
+  Object.keys(EMP_STATUS_META).forEach(s => {
+    counts[s] = employees.filter(e => (e.empStatus || "active") === s).length;
+  });
+
+  const applyQuickStatus = (newStatus, date, note) => {
+    setEmployees(p => p.map(e => e.id === quickStatus.emp.id
+      ? { ...e, empStatus: newStatus, statusDate: date, statusNote: note }
+      : e
+    ));
+    toast(`Status changed to ${EMP_STATUS_META[newStatus].label}`, "success");
+    setQuickStatus(null);
+  };
 
   return (
     <div>
+      {/* Status filter tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {[["all", "All", "badge-blue"], ...Object.entries(EMP_STATUS_META).map(([k,v]) => [k, v.label, v.badge])].map(([k, label, badge]) => (
+          <div key={k} onClick={() => setStatusFilter(k)}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 20, cursor: "pointer", fontSize: 12, fontWeight: 700,
+              background: statusFilter === k ? "rgba(59,130,246,0.15)" : "var(--surface2)",
+              border: `1px solid ${statusFilter === k ? "#3b82f6" : "var(--border)"}`,
+              color: statusFilter === k ? "#3b82f6" : "var(--text3)", transition: "all 0.12s" }}>
+            {label} <span style={{ background: "var(--surface3)", borderRadius: 10, padding: "1px 7px", fontSize: 11 }}>{counts[k] || 0}</span>
+          </div>
+        ))}
+      </div>
+
       <div className="flex-between mb-4">
         <input className="form-input" style={{ width: 240 }} placeholder="Search name / ID..." value={filter} onChange={e => setFilter(e.target.value)} />
         <button className="btn btn-primary" onClick={() => setModal("new")}>+ Add Employee</button>
@@ -1027,31 +1089,45 @@ function EmployeesPage({ employees, setEmployees, toast }) {
             <tbody>
               {filtered.length === 0 ? (
                 <tr><td colSpan={7}><div className="empty-state"><div className="icon">👷</div><p>No employees found</p></div></td></tr>
-              ) : filtered.map(e => (
-                <tr key={e.id}>
-                  <td className="text-mono" style={{ color: "var(--accent)" }}>{e.empId}</td>
-                  <td style={{ fontWeight: 600 }}>{e.name}</td>
-                  <td>{e.designation || "—"}</td>
-                  <td>{e.phone || "—"}</td>
-                  <td className="text-mono">{mvr(e.basicSalary)}</td>
-                  <td><span className="badge badge-green">Active</span></td>
-                  <td>
-                    <div className="gap-2">
-                      <button className="btn btn-ghost btn-sm" onClick={() => setModal(e)}>Edit</button>
-                      <button className="btn btn-danger btn-sm" onClick={() => {
-                        if (confirm("Delete this employee?")) {
-                          setEmployees(p => p.filter(x => x.id !== e.id));
-                          toast("Employee deleted", "success");
-                        }
-                      }}>Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              ) : filtered.map(e => {
+                const st = e.empStatus || "active";
+                const meta = EMP_STATUS_META[st] || EMP_STATUS_META.active;
+                return (
+                  <tr key={e.id}>
+                    <td className="text-mono" style={{ color: "var(--accent)" }}>{e.empId}</td>
+                    <td style={{ fontWeight: 600 }}>{e.name}</td>
+                    <td>{e.designation || "—"}</td>
+                    <td>{e.phone || "—"}</td>
+                    <td className="text-mono">{mvr(e.basicSalary)}</td>
+                    <td>
+                      <div>
+                        <span className={`badge ${meta.badge}`}>{meta.icon} {meta.label}</span>
+                        {e.statusDate && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Since {e.statusDate}</div>}
+                        {e.statusNote && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 1, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.statusNote}</div>}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="gap-2" style={{ flexWrap: "wrap" }}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setQuickStatus({ emp: e })}>⚡ Status</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setModal(e)}>Edit</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => {
+                          if (confirm("Delete this employee?")) {
+                            setEmployees(p => p.filter(x => x.id !== e.id));
+                            toast("Employee deleted", "success");
+                          }
+                        }}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Quick Status Change Modal */}
+      {quickStatus && <QuickStatusModal emp={quickStatus.emp} onSave={applyQuickStatus} onClose={() => setQuickStatus(null)} />}
 
       {modal && (
         <EmployeeModal
@@ -1072,6 +1148,57 @@ function EmployeesPage({ employees, setEmployees, toast }) {
     </div>
   );
 }
+
+function QuickStatusModal({ emp, onSave, onClose }) {
+  const [newStatus, setNewStatus] = useState(emp.empStatus || "active");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState(emp.statusNote || "");
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal" style={{ maxWidth: 400 }}>
+        <div className="modal-header">
+          <div className="modal-title">Change Status — {emp.name}</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+            {Object.entries(EMP_STATUS_META).map(([k, v]) => (
+              <div key={k} onClick={() => setNewStatus(k)}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 10, cursor: "pointer",
+                  border: `2px solid ${newStatus === k ? v.color : "var(--border)"}`,
+                  background: newStatus === k ? `${v.color}18` : "var(--surface2)", transition: "all 0.12s" }}>
+                <span style={{ fontSize: 20 }}>{v.icon}</span>
+                <div>
+                  <div style={{ fontWeight: 700, color: newStatus === k ? v.color : "var(--text)", fontSize: 14 }}>{v.label}</div>
+                  <div style={{ fontSize: 11, color: "var(--text3)" }}>
+                    {k === "active" && "Employee is working normally"}
+                    {k === "leave" && "Temporary leave — will return"}
+                    {k === "fled" && "Employee has absconded / run away"}
+                    {k === "resigned" && "Employee has formally resigned"}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="form-group" style={{ marginBottom: 12 }}>
+            <label className="form-label">Effective Date</label>
+            <input className="form-input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Notes (optional)</label>
+            <input className="form-input" value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Expected back 1 May, Resigned via email..." />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => onSave(newStatus, date, note)}>Save Status</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 // ROSTER PAGE — one global roster per month (no site selection)
 function RosterPage({ employees, rosters, setRosters, toast }) {
@@ -1348,7 +1475,7 @@ function AttendancePage({ employees, sites, attendance, setAttendance, rosters, 
   const day = dateObj.getDate(), mo = dateObj.getMonth(), yr = dateObj.getFullYear();
   const monthKey = `${yr}-${String(mo + 1).padStart(2, "0")}`;
   const roster = rosters[monthKey] || {};
-  const allRosterEmps = employees.filter(e => Object.keys(roster).includes(e.id));
+  const allRosterEmps = employees.filter(e => Object.keys(roster).includes(e.id) && (e.empStatus || "active") === "active");
 
   const takenOnDate = useMemo(() => {
     const taken = new Set();
