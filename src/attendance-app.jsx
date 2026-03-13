@@ -765,6 +765,20 @@ const EMP_STATUS_META = {
   resigned:{ label: "Resigned", badge: "badge-gray",   color: "#94a3b8", icon: "✗" },
 };
 
+// Was this employee active (able to work) on a given date string "YYYY-MM-DD"?
+// Rules:
+//   - If current status is "active" → always true (status change back to active clears restriction)
+//   - If current status is leave/fled/resigned AND statusDate is set:
+//       → active BEFORE statusDate, locked FROM statusDate onwards
+//   - If statusDate is not set but status is non-active → locked for all dates (conservative)
+function isEmpActiveOnDate(emp, dateStr) {
+  const st = emp.empStatus || "active";
+  if (st === "active") return true;
+  if (!emp.statusDate) return false; // no date set, treat as locked for all
+  // employee was active before their statusDate
+  return dateStr < emp.statusDate;
+}
+
 function EmployeeModal({ emp, onSave, onClose }) {
   const [form, setForm] = useState(emp ? { ...emp } : { ...EMPTY_EMP });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -1223,14 +1237,9 @@ function RosterPage({ employees, rosters, setRosters, toast }) {
   const TYPE_LABELS = { W: "Work", O: "Off", H: "Holiday", L: "Leave" };
 
   // Returns true if a day should be locked due to employee status
-  // Lock starts from statusDate day (inclusive) if status is leave/fled/resigned
   const isDayLocked = (emp, day) => {
-    const st = emp.empStatus || "active";
-    if (st === "active") return false;
-    if (!emp.statusDate) return false; // no date set — lock whole month to be safe
-    const statusD = new Date(emp.statusDate + "T00:00:00");
-    const cellD = new Date(year, month, day);
-    return cellD >= statusD;
+    const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+    return !isEmpActiveOnDate(emp, dateStr);
   };
 
   // What label to show on a locked cell
@@ -1529,7 +1538,7 @@ function AttendancePage({ employees, sites, attendance, setAttendance, rosters, 
   const day = dateObj.getDate(), mo = dateObj.getMonth(), yr = dateObj.getFullYear();
   const monthKey = `${yr}-${String(mo + 1).padStart(2, "0")}`;
   const roster = rosters[monthKey] || {};
-  const allRosterEmps = employees.filter(e => Object.keys(roster).includes(e.id) && (e.empStatus || "active") === "active");
+  const allRosterEmps = employees.filter(e => Object.keys(roster).includes(e.id) && isEmpActiveOnDate(e, date));
 
   const takenOnDate = useMemo(() => {
     const taken = new Set();
@@ -1852,8 +1861,8 @@ function OTEntryPage({ employees, sites, attendance, ot, setOt, rosters, toast }
     return ids;
   }, [attendance, date]);
 
-  // Employees eligible for OT = those who worked today
-  const eligibleEmps = employees.filter(e => workedToday.has(e.id));
+  // Employees eligible for OT = those who worked on this date AND were active on this date
+  const eligibleEmps = employees.filter(e => workedToday.has(e.id) && isEmpActiveOnDate(e, date));
 
   // Employees already assigned OT at another site today
   const otTakenElsewhere = useMemo(() => {
