@@ -1214,7 +1214,6 @@ function RosterPage({ employees, rosters, setRosters, toast }) {
   const firstOfMonth = new Date(year, month, 1);
   const canEdit = today >= new Date(firstOfMonth.getTime() - 3 * 86400000);
 
-  // Global roster key — no site
   const rKey = monthKey;
   const roster = rosters[rKey] || {};
   const assignedIds = Object.keys(roster);
@@ -1223,11 +1222,32 @@ function RosterPage({ employees, rosters, setRosters, toast }) {
   const TYPES = ["W", "O", "H", "L"];
   const TYPE_LABELS = { W: "Work", O: "Off", H: "Holiday", L: "Leave" };
 
-  const cycleType = (empId, day) => {
+  // Returns true if a day should be locked due to employee status
+  // Lock starts from statusDate day (inclusive) if status is leave/fled/resigned
+  const isDayLocked = (emp, day) => {
+    const st = emp.empStatus || "active";
+    if (st === "active") return false;
+    if (!emp.statusDate) return false; // no date set — lock whole month to be safe
+    const statusD = new Date(emp.statusDate + "T00:00:00");
+    const cellD = new Date(year, month, day);
+    return cellD >= statusD;
+  };
+
+  // What label to show on a locked cell
+  const lockedLabel = (emp) => {
+    const st = emp.empStatus || "active";
+    if (st === "leave")    return { text: "LV", color: "#f59e0b", bg: "rgba(245,158,11,0.18)", title: "On Leave" };
+    if (st === "fled")     return { text: "FL", color: "#ef4444", bg: "rgba(239,68,68,0.18)",  title: "Fled" };
+    if (st === "resigned") return { text: "RS", color: "#94a3b8", bg: "rgba(148,163,184,0.18)",title: "Resigned" };
+    return null;
+  };
+
+  const cycleType = (emp, day) => {
     if (!canEdit) return;
-    const cur = roster[empId]?.[day] || "W";
+    if (isDayLocked(emp, day)) return; // locked — do nothing
+    const cur = roster[emp.id]?.[day] || "W";
     const next = TYPES[(TYPES.indexOf(cur) + 1) % TYPES.length];
-    setRosters(p => ({ ...p, [rKey]: { ...p[rKey], [empId]: { ...(p[rKey]?.[empId] || {}), [day]: next } } }));
+    setRosters(p => ({ ...p, [rKey]: { ...p[rKey], [emp.id]: { ...(p[rKey]?.[emp.id] || {}), [day]: next } } }));
   };
 
   const toggleEmp = (empId) => {
@@ -1305,7 +1325,10 @@ function RosterPage({ employees, rosters, setRosters, toast }) {
                 {t} = {TYPE_LABELS[t]}
               </span>
             ))}
-            {canEdit && <span className="text-sm" style={{ marginLeft: 4 }}>Tap cells to cycle W → O → H → L</span>}
+            <span className="badge" style={{ background: "rgba(245,158,11,0.18)", color: "#f59e0b", border: "1px solid #f59e0b44" }}>LV = On Leave</span>
+            <span className="badge" style={{ background: "rgba(239,68,68,0.18)", color: "#ef4444", border: "1px solid #ef444444" }}>FL = Fled</span>
+            <span className="badge" style={{ background: "rgba(148,163,184,0.18)", color: "#94a3b8", border: "1px solid #94a3b844" }}>RS = Resigned</span>
+            {canEdit && <span className="text-sm" style={{ marginLeft: 4 }}>Tap cells to cycle · Locked cells cannot be changed</span>}
           </div>
           <div className="card">
             <div className="card-header">
@@ -1330,20 +1353,48 @@ function RosterPage({ employees, rosters, setRosters, toast }) {
                 <tbody>
                   {rosterEmps.map(e => {
                     const row = roster[e.id] || {};
+                    const locked = lockedLabel(e);
                     const counts = { W: 0, H: 0, L: 0, O: 0 };
-                    for (let d = 1; d <= days; d++) { const t = row[d] || "W"; counts[t] = (counts[t]||0)+1; }
+                    for (let d = 1; d <= days; d++) {
+                      if (!isDayLocked(e, d)) {
+                        const t = row[d] || "W";
+                        counts[t] = (counts[t]||0)+1;
+                      }
+                    }
+                    const empStatus = e.empStatus || "active";
+                    const statusMeta = EMP_STATUS_META[empStatus];
                     return (
                       <tr key={e.id}>
                         <td style={{ fontWeight: 600, fontSize: 12, position: "sticky", left: 0, background: "var(--surface)", zIndex: 1 }}>
-                          {e.name}
+                          <div>{e.name}</div>
                           {e.designation && <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 400 }}>{e.designation}</div>}
+                          {empStatus !== "active" && (
+                            <div style={{ marginTop: 3 }}>
+                              <span className={`badge ${statusMeta.badge}`} style={{ fontSize: 9 }}>{statusMeta.icon} {statusMeta.label}</span>
+                              {e.statusDate && <div style={{ fontSize: 9, color: "var(--text3)" }}>from {e.statusDate}</div>}
+                            </div>
+                          )}
                         </td>
                         {Array.from({ length: days }, (_, i) => {
                           const d = i + 1;
+                          const isLocked = isDayLocked(e, d);
                           const t = row[d] || "W";
+                          if (isLocked && locked) {
+                            return (
+                              <td key={d} style={{ padding: 3 }} title={`${locked.title} — cannot edit`}>
+                                <span style={{
+                                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                  width: 26, height: 26, borderRadius: 4, fontSize: 9, fontWeight: 800,
+                                  background: locked.bg, color: locked.color,
+                                  border: `1px solid ${locked.color}44`, cursor: "not-allowed",
+                                  userSelect: "none"
+                                }}>{locked.text}</span>
+                              </td>
+                            );
+                          }
                           return (
                             <td key={d} style={{ padding: 3 }}>
-                              <span className={`roster-cell roster-${t}`} onClick={() => cycleType(e.id, d)} style={{ cursor: canEdit ? "pointer" : "default" }}>{t}</span>
+                              <span className={`roster-cell roster-${t}`} onClick={() => cycleType(e, d)} style={{ cursor: canEdit ? "pointer" : "default" }}>{t}</span>
                             </td>
                           );
                         })}
@@ -1382,6 +1433,8 @@ function RosterPage({ employees, rosters, setRosters, toast }) {
                   <div className="empty-state"><p>No employees added yet</p></div>
                 ) : employees.map(e => {
                   const isAssigned = assignedIds.includes(e.id);
+                  const st = e.empStatus || "active";
+                  const stMeta = EMP_STATUS_META[st];
                   return (
                     <label key={e.id} style={{ display: "flex", gap: 12, alignItems: "center", padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid var(--border)", background: isAssigned ? "rgba(59,130,246,0.06)" : "transparent" }}>
                       <input type="checkbox" checked={isAssigned} onChange={() => toggleEmp(e.id)} style={{ width: 16, height: 16, flexShrink: 0 }} />
@@ -1389,6 +1442,7 @@ function RosterPage({ employees, rosters, setRosters, toast }) {
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{e.name}</div>
                         <div className="text-sm">{e.empId}{e.designation ? ` · ${e.designation}` : ""}</div>
                       </div>
+                      <span className={`badge ${stMeta.badge}`} style={{ fontSize: 9 }}>{stMeta.icon} {stMeta.label}</span>
                       {isAssigned && <span className="badge badge-blue">✓</span>}
                     </label>
                   );
