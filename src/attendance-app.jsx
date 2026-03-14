@@ -1060,7 +1060,8 @@ function SitesPage({ sites, setSites, toast }) {
 }
 
 // EMPLOYEES PAGE
-function EmployeesPage({ employees, setEmployees, toast }) {
+function EmployeesPage({ employees, setEmployees, toast, user }) {
+  const isManager = user?.role === "manager";
   const [modal, setModal] = useState(null);
   const [filter, setFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -1102,8 +1103,11 @@ function EmployeesPage({ employees, setEmployees, toast }) {
       </div>
 
       <div className="flex-between mb-4">
-        <input className="form-input" style={{ width: 240 }} placeholder="Search name / ID..." value={filter} onChange={e => setFilter(e.target.value)} />
-        <button className="btn btn-primary" onClick={() => setModal("new")}>+ Add Employee</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <input className="form-input" style={{ width: 240 }} placeholder="Search name / ID..." value={filter} onChange={e => setFilter(e.target.value)} />
+          {!isManager && <span className="badge badge-blue" style={{ fontSize: 11 }}>👁 View Only</span>}
+        </div>
+        {isManager && <button className="btn btn-primary" onClick={() => setModal("new")}>+ Add Employee</button>}
       </div>
 
       <div className="card">
@@ -1112,12 +1116,13 @@ function EmployeesPage({ employees, setEmployees, toast }) {
             <thead>
               <tr>
                 <th>Emp ID</th><th>Name</th><th>Designation</th><th>Phone</th>
-                <th>Basic Salary</th><th>Status</th><th>Actions</th>
+                <th>Basic Salary</th><th>Status</th>
+                {isManager && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={7}><div className="empty-state"><div className="icon">👷</div><p>No employees found</p></div></td></tr>
+                <tr><td colSpan={isManager ? 7 : 6}><div className="empty-state"><div className="icon">👷</div><p>No employees found</p></div></td></tr>
               ) : filtered.map(e => {
                 const st = e.empStatus || "active";
                 const meta = EMP_STATUS_META[st] || EMP_STATUS_META.active;
@@ -1127,7 +1132,7 @@ function EmployeesPage({ employees, setEmployees, toast }) {
                     <td style={{ fontWeight: 600 }}>{e.name}</td>
                     <td>{e.designation || "—"}</td>
                     <td>{e.phone || "—"}</td>
-                    <td className="text-mono">{mvr(e.basicSalary)}</td>
+                    <td className="text-mono">{isManager ? mvr(e.basicSalary) : "—"}</td>
                     <td>
                       <div>
                         <span className={`badge ${meta.badge}`}>{meta.icon} {meta.label}</span>
@@ -1135,18 +1140,20 @@ function EmployeesPage({ employees, setEmployees, toast }) {
                         {e.statusNote && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 1, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.statusNote}</div>}
                       </div>
                     </td>
-                    <td>
-                      <div className="gap-2" style={{ flexWrap: "wrap" }}>
-                        <button className="btn btn-ghost btn-sm" onClick={() => setQuickStatus({ emp: e })}>⚡ Status</button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => setModal(e)}>Edit</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => {
-                          if (confirm("Delete this employee?")) {
-                            setEmployees(p => p.filter(x => x.id !== e.id));
-                            toast("Employee deleted", "success");
-                          }
-                        }}>Delete</button>
-                      </div>
-                    </td>
+                    {isManager && (
+                      <td>
+                        <div className="gap-2" style={{ flexWrap: "wrap" }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setQuickStatus({ emp: e })}>⚡ Status</button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setModal(e)}>Edit</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => {
+                            if (confirm("Delete this employee?")) {
+                              setEmployees(p => p.filter(x => x.id !== e.id));
+                              toast("Employee deleted", "success");
+                            }
+                          }}>Delete</button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -1155,10 +1162,10 @@ function EmployeesPage({ employees, setEmployees, toast }) {
         </div>
       </div>
 
-      {/* Quick Status Change Modal */}
-      {quickStatus && <QuickStatusModal emp={quickStatus.emp} onSave={applyQuickStatus} onClose={() => setQuickStatus(null)} />}
+      {/* Quick Status Change Modal — manager only */}
+      {quickStatus && isManager && <QuickStatusModal emp={quickStatus.emp} onSave={applyQuickStatus} onClose={() => setQuickStatus(null)} />}
 
-      {modal && (
+      {modal && isManager && (
         <EmployeeModal
           emp={modal === "new" ? null : modal}
           onSave={emp => {
@@ -1230,7 +1237,8 @@ function QuickStatusModal({ emp, onSave, onClose }) {
 
 
 // ROSTER PAGE — one global roster per month (no site selection)
-function RosterPage({ employees, rosters, setRosters, toast }) {
+function RosterPage({ employees, rosters, setRosters, toast, user }) {
+  const isManager = user?.role === "manager";
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -1241,7 +1249,7 @@ function RosterPage({ employees, rosters, setRosters, toast }) {
   const days = getDaysInMonth(year, month);
 
   const firstOfMonth = new Date(year, month, 1);
-  const canEdit = today >= new Date(firstOfMonth.getTime() - 3 * 86400000);
+  const canEdit = isManager && today >= new Date(firstOfMonth.getTime() - 3 * 86400000);
 
   const rKey = monthKey;
   const roster = rosters[rKey] || {};
@@ -1333,7 +1341,10 @@ function RosterPage({ employees, rosters, setRosters, toast }) {
         </div>
       </div>
 
-      {!canEdit && (
+      {!isManager && (
+        <div className="alert alert-info" style={{ marginBottom: 12 }}>👁 View Only — only managers can edit the roster.</div>
+      )}
+      {!canEdit && isManager && (
         <div className="alert alert-warning">⚠ Roster editing opens 3 days before the month starts ({new Date(firstOfMonth.getTime() - 3*86400000).toDateString()})</div>
       )}
 
@@ -1540,7 +1551,8 @@ function StepBreadcrumb({ steps, labels, current, onGoTo }) {
 // attendance[date][siteId][empId] = { status, minutesLate }
 // OT is entered separately in OTEntryPage
 // ============================================================
-function AttendancePage({ employees, sites, attendance, setAttendance, rosters, toast }) {
+function AttendancePage({ employees, sites, attendance, setAttendance, rosters, toast, user }) {
+  const isManager = user?.role === "manager";
   const todayStr = new Date().toISOString().slice(0, 10);
   const [step, setStep] = useState("date");
   const [date, setDate] = useState(todayStr);
@@ -1706,6 +1718,21 @@ function AttendancePage({ employees, sites, attendance, setAttendance, rosters, 
 
   const availableEmps = allRosterEmps.filter(e => !takenOnDate.has(e.id));
   const selectedIds = Object.keys(localAtt);
+
+  const deleteAttendance = (dateStr, sid) => {
+    if (!confirm(`Delete all attendance for ${sites.find(s=>s.id===sid)?.name || sid} on ${dateStr}? This cannot be undone.`)) return;
+    setAttendance(p => {
+      const next = { ...p };
+      if (next[dateStr]) {
+        const dayNext = { ...next[dateStr] };
+        delete dayNext[sid];
+        if (Object.keys(dayNext).length === 0) delete next[dateStr];
+        else next[dateStr] = dayNext;
+      }
+      return next;
+    });
+    toast("Attendance deleted", "success");
+  };
 
   const reset = () => { setStep("date"); setSiteId(""); setLocalAtt({}); setSaved(false); setFilterStatus("ALL"); };
 
@@ -2054,15 +2081,19 @@ function AttendancePage({ employees, sites, attendance, setAttendance, rosters, 
               const s = sites.find(x => x.id === sid);
               const pCount = Object.values(empMap).filter(a => a.status === "P").length;
               return (
-                <div key={sid} className="card" style={{ cursor: "pointer" }} onClick={() => { setStep("site"); goToStaff(sid); }}>
-                  <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div>
+                <div key={sid} className="card">
+                  <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ cursor: "pointer", flex: 1 }} onClick={() => { setStep("site"); goToStaff(sid); }}>
                       <div style={{ fontWeight: 700 }}>{s?.name || sid}</div>
                       <div style={{ fontSize: 12, color: "var(--text3)" }}>{Object.keys(empMap).length} staff · {pCount} present</div>
                     </div>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <span className="badge badge-green">✓ Saved</span>
-                      <span style={{ color: "var(--text3)", fontSize: 18 }}>›</span>
+                      {isManager && (
+                        <button className="btn btn-danger btn-sm" onClick={ev => { ev.stopPropagation(); deleteAttendance(date, sid); }}
+                          style={{ fontSize: 11, padding: "4px 10px" }}>🗑 Delete</button>
+                      )}
+                      <span style={{ color: "var(--text3)", fontSize: 18, cursor: "pointer" }} onClick={() => { setStep("site"); goToStaff(sid); }}>›</span>
                     </div>
                   </div>
                 </div>
@@ -2086,15 +2117,23 @@ function AttendancePage({ employees, sites, attendance, setAttendance, rosters, 
             {sites.map(s => {
               const existingCount = Object.keys((attendance[date] || {})[s.id] || {}).length;
               return (
-                <div key={s.id} onClick={() => goToStaff(s.id)}
-                  style={{ padding: "14px 16px", borderRadius: 10, border: "1px solid var(--border)", cursor: "pointer", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "space-between", transition: "border-color 0.15s" }}
+                <div key={s.id}
+                  style={{ padding: "14px 16px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, transition: "border-color 0.15s" }}
                   onMouseEnter={ev => ev.currentTarget.style.borderColor="#3b82f6"}
                   onMouseLeave={ev => ev.currentTarget.style.borderColor="var(--border)"}>
-                  <div>
+                  <div style={{ cursor: "pointer", flex: 1 }} onClick={() => goToStaff(s.id)}>
                     <div style={{ fontWeight: 700 }}>{s.name}</div>
                     {s.location && <div style={{ fontSize: 11, color: "var(--text3)" }}>{s.location}</div>}
                   </div>
-                  {existingCount > 0 ? <span className="badge badge-green">✓ {existingCount} entered</span> : <span className="badge badge-gray">Not entered</span>}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {existingCount > 0
+                      ? <span className="badge badge-green" style={{ cursor: "pointer" }} onClick={() => goToStaff(s.id)}>✓ {existingCount} entered</span>
+                      : <span className="badge badge-gray" style={{ cursor: "pointer" }} onClick={() => goToStaff(s.id)}>Not entered</span>}
+                    {isManager && existingCount > 0 && (
+                      <button className="btn btn-danger btn-sm" onClick={() => deleteAttendance(date, s.id)}
+                        style={{ fontSize: 11, padding: "4px 10px" }}>🗑 Delete</button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -3361,7 +3400,7 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
 const ALL_NAV = [
   { id: "dashboard", icon: "⊞", label: "Dashboard",   group: "Overview",    roles: ["manager","supervisor"] },
   { id: "sites",     icon: "🏗", label: "Work Sites",  group: "Setup",       roles: ["manager"] },
-  { id: "employees", icon: "👷", label: "Employees",   group: "Setup",       roles: ["manager"] },
+  { id: "employees", icon: "👷", label: "Employees",   group: "Setup",       roles: ["manager","supervisor"] },
   { id: "deductions",icon: "💳", label: "Deductions",  group: "Setup",       roles: ["manager"] },
   { id: "roster",    icon: "📋", label: "Duty Roster", group: "Operations",  roles: ["manager","supervisor"] },
   { id: "attendance",icon: "✓",  label: "Attendance",  group: "Operations",  roles: ["manager","supervisor"] },
@@ -3575,10 +3614,10 @@ export default function App() {
           <div className="page-content">
             {page === "dashboard"  && <Dashboard employees={employees} sites={sites} attendance={attendance} rosters={rosters} />}
             {page === "sites"      && <SitesPage sites={sites} setSites={setSites} toast={toast} />}
-            {page === "employees"  && <EmployeesPage employees={employees} setEmployees={setEmployees} toast={toast} />}
+            {page === "employees"  && <EmployeesPage employees={employees} setEmployees={setEmployees} toast={toast} user={user} />}
             {page === "deductions" && <DeductionsPage employees={employees} deductions={deductions} setDeductions={setDeductions} toast={toast} />}
-            {page === "roster"     && <RosterPage employees={employees} rosters={rosters} setRosters={setRosters} toast={toast} />}
-            {page === "attendance" && <AttendancePage employees={employees} sites={sites} attendance={attendance} setAttendance={setAttendance} rosters={rosters} toast={toast} />}
+            {page === "roster"     && <RosterPage employees={employees} rosters={rosters} setRosters={setRosters} toast={toast} user={user} />}
+            {page === "attendance" && <AttendancePage employees={employees} sites={sites} attendance={attendance} setAttendance={setAttendance} rosters={rosters} toast={toast} user={user} />}
             {page === "otentry"    && <OTEntryPage employees={employees} sites={sites} attendance={attendance} ot={ot} setOt={setOt} rosters={rosters} toast={toast} />}
             {page === "timesheet"  && <TimesheetPage employees={employees} sites={sites} attendance={attendance} setAttendance={setAttendance} rosters={rosters} toast={toast} />}
             {page === "payroll"    && <PayrollPage employees={employees} sites={sites} attendance={attendance} ot={ot} rosters={rosters} deductions={deductions} toast={toast} />}
