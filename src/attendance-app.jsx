@@ -1997,6 +1997,8 @@ function AttendancePage({ employees, sites, attendance, setAttendance, rosters, 
       </div>
     </div>
   );
+
+  const STATUS_META = {
     P: { label: "Present",  color: "#10b981", bg: "rgba(16,185,129,0.15)" },
     A: { label: "Absent",   color: "#ef4444", bg: "rgba(239,68,68,0.15)" },
     H: { label: "Half Day", color: "#f59e0b", bg: "rgba(245,158,11,0.15)" },
