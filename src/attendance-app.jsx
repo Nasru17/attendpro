@@ -1055,74 +1055,209 @@ function EmployeeModal({ emp, onSave, onClose }) {
 // ============================================================
 
 // DASHBOARD
-function Dashboard({ employees, sites, attendance, rosters }) {
+function Dashboard({ employees, sites, attendance, rosters, ot }) {
   const today = new Date();
   const todayKey = today.toISOString().slice(0, 10);
+  const monthKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
+  const totalDays = getDaysInMonth(today.getFullYear(), today.getMonth());
+  const dayOfMonth = today.getDate();
+
+  // Today's attendance flat across all sites
   const todayAtt = attendance[todayKey] || {};
-  // attendance[date][siteId][empId] — flatten across all sites
-  const todayAllEmps = Object.values(todayAtt).flatMap(siteMap => Object.values(siteMap));
-  const presentToday = todayAllEmps.filter(r => r.status === "P").length;
-  const absentToday = todayAllEmps.filter(r => r.status === "A").length;
+  const todayFlatByEmp = {};
+  Object.entries(todayAtt).forEach(([sid, empMap]) => {
+    Object.entries(empMap).forEach(([eid, rec]) => { todayFlatByEmp[eid] = { ...rec, siteId: sid }; });
+  });
+  const presentToday   = Object.values(todayFlatByEmp).filter(r=>r.status==="P").length;
+  const absentToday    = Object.values(todayFlatByEmp).filter(r=>r.status==="A").length;
+  const halfToday      = Object.values(todayFlatByEmp).filter(r=>r.status==="H").length;
+  const sickToday      = Object.values(todayFlatByEmp).filter(r=>r.status==="S").length;
+  const leaveToday     = Object.values(todayFlatByEmp).filter(r=>r.status==="L").length;
+  const enteredToday   = Object.values(todayFlatByEmp).length;
+
+  const activeEmps     = employees.filter(e=>(e.empStatus||"active")==="active");
+  const onLeave        = employees.filter(e=>e.empStatus==="leave").length;
+  const fled           = employees.filter(e=>e.empStatus==="fled").length;
+  const resigned       = employees.filter(e=>e.empStatus==="resigned").length;
+  const rosterEmps     = Object.keys(rosters[monthKey]||{}).length;
+  const attendanceRate = rosterEmps > 0 ? Math.round((presentToday / rosterEmps) * 100) : 0;
+
+  // Last 7 days attendance trend
+  const last7 = Array.from({length:7},(_,i)=>{
+    const d = new Date(today); d.setDate(today.getDate()-6+i);
+    const dk = d.toISOString().slice(0,10);
+    const dayAtt = attendance[dk]||{};
+    let p=0,a=0,total=0;
+    Object.values(dayAtt).forEach(siteMap=>Object.values(siteMap).forEach(r=>{total++;if(r.status==="P")p++;else if(r.status==="A")a++;}));
+    return { date:dk, label:d.toLocaleDateString("en",{weekday:"short"}), day:d.getDate(), p, a, total };
+  });
+  const maxBar = Math.max(...last7.map(d=>d.total), 1);
+
+  // Monthly summary so far
+  const monthSummary = { P:0, A:0, H:0, S:0, L:0 };
+  for (let d=1; d<=dayOfMonth; d++) {
+    const dk = `${monthKey}-${String(d).padStart(2,"0")}`;
+    const dayAtt = attendance[dk]||{};
+    Object.values(dayAtt).forEach(sm=>Object.values(sm).forEach(r=>{if(monthSummary[r.status]!==undefined)monthSummary[r.status]++;}));
+  }
+  const monthTotal = Object.values(monthSummary).reduce((s,v)=>s+v,0);
+
+  // Site-wise today
+  const siteToday = sites.map(s=>{
+    const sm = todayAtt[s.id]||{};
+    const p = Object.values(sm).filter(r=>r.status==="P").length;
+    const total = Object.values(sm).length;
+    return { ...s, p, total };
+  }).filter(s=>s.total>0);
+
+  // OT this month
+  let monthGenOT=0, monthConcreteOT=0, monthCementOT=0;
+  for (let d=1; d<=dayOfMonth; d++) {
+    const dk=`${monthKey}-${String(d).padStart(2,"0")}`;
+    const otDay = ot?.[dk]||{};
+    Object.values(otDay).forEach(sm=>Object.values(sm).forEach(r=>{monthGenOT+=(r.genOT||0);monthConcreteOT+=(r.concreteOT||0);monthCementOT+=(r.cementOT||0);}));
+  }
+
+  // Employees on leave / flagged
+  const flaggedEmps = employees.filter(e=>e.empStatus&&e.empStatus!=="active");
 
   return (
-    <div>
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-label">Active Employees</div>
-          <div className="stat-value blue">{employees.filter(e => (e.empStatus||"active") === "active").length}</div>
-          {employees.filter(e => (e.empStatus||"active") !== "active").length > 0 &&
-            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>{employees.filter(e => (e.empStatus||"active") !== "active").length} inactive</div>}
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Work Sites</div>
-          <div className="stat-value purple">{sites.length}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Present Today</div>
-          <div className="stat-value green">{presentToday}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Absent Today</div>
-          <div className="stat-value yellow">{absentToday}</div>
-        </div>
+    <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+
+      {/* Top KPI row */}
+      <div className="stats-grid" style={{ gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))" }}>
+        {[
+          { label:"Active Staff", value:activeEmps.length, sub:`${rosterEmps} in roster`, color:"#3b82f6", icon:"👷" },
+          { label:"Present Today", value:presentToday, sub:`${attendanceRate}% of roster`, color:"#10b981", icon:"✅" },
+          { label:"Absent Today",  value:absentToday,  sub:`${halfToday} half-day`, color:"#ef4444", icon:"❌" },
+          { label:"Sick / Leave",  value:sickToday+leaveToday, sub:`${enteredToday} total entered`, color:"#f59e0b", icon:"🏖" },
+          { label:"Work Sites",    value:sites.length, sub:`${siteToday.length} active today`, color:"#8b5cf6", icon:"🏗" },
+          { label:"Month OT Hrs",  value:monthGenOT.toFixed(1), sub:`${monthConcreteOT} concrete · ${monthCementOT} cement`, color:"#06b6d4", icon:"⏱" },
+        ].map(k=>(
+          <div key={k.label} className="stat-card" style={{ position:"relative", overflow:"hidden" }}>
+            <div style={{ position:"absolute", right:12, top:12, fontSize:22, opacity:0.15 }}>{k.icon}</div>
+            <div className="stat-label">{k.label}</div>
+            <div className="stat-value" style={{ color:k.color, fontSize:28 }}>{k.value}</div>
+            <div style={{ fontSize:11, color:"var(--text3)", marginTop:4 }}>{k.sub}</div>
+          </div>
+        ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+      {/* Middle row: 7-day trend + monthly pie-like */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+
+        {/* 7-day bar trend */}
         <div className="card">
-          <div className="card-header"><div className="card-title">Sites Overview</div></div>
+          <div className="card-header"><div className="card-title">📈 Last 7 Days — Attendance</div></div>
           <div className="card-body">
-            {sites.length === 0 ? <div className="empty-state"><p>No sites added yet</p></div> :
-              sites.map(s => {
-                // Count employees who appear in any roster for this site
-                const rosterKeys = Object.keys(rosters).filter(k => k.includes(`:${s.id}`));
-                const empSet = new Set();
-                rosterKeys.forEach(k => Object.keys(rosters[k]).forEach(id => empSet.add(id)));
-                const count = empSet.size;
-                return (
-                  <div key={s.id} className="flex-between" style={{ marginBottom: 12 }}>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</div>
-                      <div className="text-sm">{count} assigned in rosters</div>
-                    </div>
-                    <span className="badge badge-blue">{count}</span>
+            <div style={{ display:"flex", gap:6, alignItems:"flex-end", height:100 }}>
+              {last7.map(d=>(
+                <div key={d.date} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                  <div style={{ width:"100%", display:"flex", flexDirection:"column", justifyContent:"flex-end", height:80, gap:1 }}>
+                    {d.a>0&&<div style={{ background:"#ef444488", borderRadius:"3px 3px 0 0", height:`${(d.a/maxBar)*80}px`, minHeight:2, width:"100%" }} title={`Absent: ${d.a}`} />}
+                    {d.p>0&&<div style={{ background:d.date===todayKey?"#10b981":"#3b82f688", borderRadius: d.a>0?"0":"3px 3px 0 0", height:`${(d.p/maxBar)*80}px`, minHeight:2, width:"100%" }} title={`Present: ${d.p}`} />}
                   </div>
-                );
-              })
+                  <div style={{ fontSize:9, color:d.date===todayKey?"#3b82f6":"var(--text3)", fontWeight:d.date===todayKey?700:400 }}>{d.label}</div>
+                  <div style={{ fontSize:8, color:"var(--text3)" }}>{d.day}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display:"flex", gap:12, marginTop:10, fontSize:10, color:"var(--text3)" }}>
+              <span style={{ display:"flex", alignItems:"center", gap:4 }}><span style={{ width:10, height:10, background:"#3b82f688", borderRadius:2, display:"inline-block" }}/> Present</span>
+              <span style={{ display:"flex", alignItems:"center", gap:4 }}><span style={{ width:10, height:10, background:"#ef444488", borderRadius:2, display:"inline-block" }}/> Absent</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Month summary donut-style */}
+        <div className="card">
+          <div className="card-header"><div className="card-title">📅 {today.toLocaleString("en",{month:"long"})} So Far (Days 1–{dayOfMonth})</div></div>
+          <div className="card-body">
+            {monthTotal === 0
+              ? <div className="empty-state"><p>No attendance entered this month yet.</p></div>
+              : <>
+                  {[
+                    ["Present (P)",  monthSummary.P, "#10b981"],
+                    ["Absent (A)",   monthSummary.A, "#ef4444"],
+                    ["Half Day (H)", monthSummary.H, "#f59e0b"],
+                    ["Sick (S)",     monthSummary.S, "#8b5cf6"],
+                    ["Leave (L)",    monthSummary.L, "#94a3b8"],
+                  ].map(([l,v,c])=>(
+                    <div key={l} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                      <div style={{ flex:1, fontSize:12 }}>{l}</div>
+                      <div style={{ width:120, height:8, background:"var(--surface3)", borderRadius:4, overflow:"hidden" }}>
+                        <div style={{ width:`${monthTotal?Math.round((v/monthTotal)*100):0}%`, height:"100%", background:c, borderRadius:4, transition:"width 0.5s" }} />
+                      </div>
+                      <div style={{ fontSize:12, fontWeight:700, color:c, width:32, textAlign:"right", fontFamily:"var(--mono)" }}>{v}</div>
+                      <div style={{ fontSize:10, color:"var(--text3)", width:28, textAlign:"right" }}>{monthTotal?Math.round((v/monthTotal)*100):0}%</div>
+                    </div>
+                  ))}
+                </>
             }
           </div>
         </div>
+      </div>
+
+      {/* Bottom row: site today + flagged employees */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+
+        {/* Site-wise today */}
         <div className="card">
-          <div className="card-header"><div className="card-title">Recent Attendance ({todayKey})</div></div>
+          <div className="card-header"><div className="card-title">🏗 Site Activity Today</div><span style={{ fontSize:11, color:"var(--text3)" }}>{todayKey}</span></div>
           <div className="card-body">
-            {Object.keys(todayAtt).length === 0 ? <div className="empty-state"><p>No attendance entered today</p></div> :
-              employees.filter(e => todayAtt[e.id]).slice(0, 8).map(e => (
-                <div key={e.id} className="flex-between" style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 13 }}>{e.name}</div>
-                  <span className={`badge ${todayAtt[e.id]?.status === "P" ? "badge-green" : todayAtt[e.id]?.status === "A" ? "badge-red" : "badge-yellow"}`}>
-                    {todayAtt[e.id]?.status || "?"}
-                  </span>
+            {sites.length === 0 && <div className="empty-state"><p>No sites added</p></div>}
+            {sites.map(s => {
+              const sm = todayAtt[s.id]||{};
+              const entries = Object.values(sm);
+              const p = entries.filter(r=>r.status==="P").length;
+              const a = entries.filter(r=>r.status==="A").length;
+              const total = entries.length;
+              const pct = total > 0 ? Math.round((p/total)*100) : 0;
+              return (
+                <div key={s.id} style={{ marginBottom:12, padding:"10px 12px", background:"var(--surface2)", borderRadius:8, border:"1px solid var(--border)" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                    <div style={{ fontWeight:600, fontSize:13 }}>{s.name}</div>
+                    {total>0
+                      ? <div style={{ display:"flex", gap:6 }}>
+                          <span className="badge badge-green" style={{ fontSize:10 }}>✓ {p}</span>
+                          {a>0&&<span className="badge badge-red" style={{ fontSize:10 }}>✗ {a}</span>}
+                        </div>
+                      : <span style={{ fontSize:11, color:"var(--text3)" }}>No entry</span>
+                    }
+                  </div>
+                  {total>0&&(
+                    <div style={{ height:4, background:"var(--surface3)", borderRadius:4, overflow:"hidden" }}>
+                      <div style={{ width:`${pct}%`, height:"100%", background:"#10b981", borderRadius:4 }} />
+                    </div>
+                  )}
                 </div>
-              ))
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Flagged / Inactive employees */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">⚠ Staff Status Alerts</div>
+            <span className="badge badge-yellow">{flaggedEmps.length} flagged</span>
+          </div>
+          <div className="card-body">
+            {flaggedEmps.length === 0
+              ? <div className="empty-state"><p>All employees are active ✓</p></div>
+              : flaggedEmps.map(e=>{
+                  const meta = EMP_STATUS_META[e.empStatus]||{};
+                  return (
+                    <div key={e.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid var(--border)" }}>
+                      <div style={{ width:32, height:32, borderRadius:"50%", background:`${meta.color}22`, color:meta.color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}>{meta.icon}</div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontWeight:600, fontSize:13, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{e.name}</div>
+                        <div style={{ fontSize:10, color:"var(--text3)" }}>{e.empId} · {e.statusDate||"no date"}</div>
+                      </div>
+                      <span className={`badge ${meta.badge}`} style={{ fontSize:10 }}>{meta.label}</span>
+                    </div>
+                  );
+                })
             }
           </div>
         </div>
@@ -2729,52 +2864,66 @@ function TimesheetPage({ employees, sites, attendance, setAttendance, rosters, t
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
-  const [siteId, setSiteId] = useState("");
+  const [siteId, setSiteId] = useState(""); // "" = all sites
   const [editing, setEditing] = useState(null);
   const [editVal, setEditVal] = useState({});
+  const [empFilter, setEmpFilter] = useState("");
 
   const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
   const days = getDaysInMonth(year, month);
-  // Global roster key
   const roster = rosters[monthKey] || {};
   const assignedIds = Object.keys(roster);
-  // attendance[date][siteId][empId] — find emp in any site for the day, or filter by selected site
+
+  // Get attendance for an employee on a day — respects site filter
   const getAtt = (empId, d) => {
     const dk = `${monthKey}-${String(d).padStart(2,"0")}`;
     const dayData = attendance[dk] || {};
     if (siteId) return dayData[siteId]?.[empId];
-    // no site filter: find first site that has this employee
     for (const sid of Object.keys(dayData)) {
       if (dayData[sid]?.[empId]) return dayData[sid][empId];
     }
     return undefined;
   };
 
-  // Show employees assigned via roster. If siteId selected, only show those who appear in that site's attendance this month.
+  // All employees in this month's roster — no site filter required
   const siteEmps = useMemo(() => {
-    const base = employees.filter(e => assignedIds.includes(e.id));
-    if (!siteId) return base;
-    return base.filter(e => {
-      for (let d = 1; d <= days; d++) {
-        const dk = `${monthKey}-${String(d).padStart(2,"0")}`;
-        if (attendance[dk]?.[siteId]?.[e.id]) return true;
+    const base = employees.filter(e => {
+      const inRoster = assignedIds.includes(e.id);
+      // If site selected: only employees who have at least one attendance record at that site this month
+      if (siteId) {
+        for (let d = 1; d <= days; d++) {
+          const dk = `${monthKey}-${String(d).padStart(2,"0")}`;
+          if (attendance[dk]?.[siteId]?.[e.id]) return true;
+        }
+        return false;
       }
-      return false;
+      return inRoster;
     });
-  }, [employees, assignedIds, siteId, attendance, days, monthKey]);
+    if (!empFilter) return base;
+    return base.filter(e => e.name.toLowerCase().includes(empFilter.toLowerCase()) || e.empId.toLowerCase().includes(empFilter.toLowerCase()));
+  }, [employees, assignedIds, siteId, attendance, days, monthKey, empFilter]);
 
   const monthEnded = new Date(year, month + 1, 0) < today;
   const statusColors = { P:"badge-green", A:"badge-red", H:"badge-yellow", S:"badge-purple", L:"badge-gray" };
 
+  // Summary totals across shown employees
+  const totals = useMemo(() => {
+    const t = { P:0, A:0, H:0, S:0, L:0 };
+    siteEmps.forEach(e => {
+      for (let d = 1; d <= days; d++) {
+        const a = getAtt(e.id, d);
+        if (a?.status && t[a.status] !== undefined) t[a.status]++;
+      }
+    });
+    return t;
+  }, [siteEmps, days, siteId, monthKey]);
+
   const startEdit = (empId, day) => {
     const dk = `${monthKey}-${String(day).padStart(2,"0")}`;
-    // find which site this emp was recorded under
     const dayData = attendance[dk] || {};
     let foundSite = siteId;
-    if (!foundSite) {
-      foundSite = Object.keys(dayData).find(sid => dayData[sid]?.[empId]);
-    }
+    if (!foundSite) foundSite = Object.keys(dayData).find(sid => dayData[sid]?.[empId]);
     const cur = (foundSite ? dayData[foundSite]?.[empId] : null) || { status: "P", genOT: 0, concreteOT: 0, cementOT: 0, minutesLate: 0 };
     setEditing({ empId, day, dk, siteKey: foundSite });
     setEditVal({ ...cur });
@@ -2793,6 +2942,7 @@ function TimesheetPage({ employees, sites, attendance, setAttendance, rosters, t
 
   return (
     <div>
+      {/* Filters */}
       <div className="card mb-4">
         <div className="card-body">
           <div className="gap-3" style={{ flexWrap: "wrap" }}>
@@ -2809,63 +2959,98 @@ function TimesheetPage({ employees, sites, attendance, setAttendance, rosters, t
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">Site</label>
+              <label className="form-label">Filter by Site</label>
               <select className="form-select" value={siteId} onChange={e => setSiteId(e.target.value)}>
-                <option value="">Select Site</option>
+                <option value="">All Sites</option>
                 {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Search Employee</label>
+              <input className="form-input" placeholder="Name or ID…" value={empFilter} onChange={e => setEmpFilter(e.target.value)} style={{ minWidth: 160 }} />
             </div>
           </div>
         </div>
       </div>
 
-      {siteId && siteEmps.length > 0 && (
+      {/* Summary strip */}
+      {siteEmps.length > 0 && (
+        <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
+          {[["👷 Employees", siteEmps.length, "#3b82f6"],["✅ Present", totals.P, "#10b981"],["❌ Absent", totals.A, "#ef4444"],["½ Half", totals.H, "#f59e0b"],["🤒 Sick", totals.S, "#8b5cf6"],["🏖 Leave", totals.L, "#94a3b8"]].map(([l,v,c]) => (
+            <div key={l} style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:10, padding:"8px 16px", display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:18, fontWeight:800, color:c, fontFamily:"var(--mono)" }}>{v}</span>
+              <span style={{ fontSize:11, color:"var(--text3)" }}>{l}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Timesheet table — always shown if there are employees in roster */}
+      {siteEmps.length === 0 ? (
+        <div className="card"><div className="card-body"><div className="empty-state"><div className="icon">📊</div><p>No employees found in roster for {months[month]} {year}{siteId ? ` at this site` : ""}.</p></div></div></div>
+      ) : (
         <div className="card">
           <div className="card-header">
-            <div className="card-title">Timesheet — {months[month]} {year}</div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              {!monthEnded && <span className="badge badge-yellow">⚠ Month not ended yet</span>}
-              {monthEnded && <span className="badge badge-green">✓ Month Ended — Editable</span>}
+            <div>
+              <div className="card-title">Timesheet — {months[month]} {year}{siteId ? ` · ${sites.find(s=>s.id===siteId)?.name||""}` : " · All Sites"}</div>
+              <div style={{ fontSize:11, color:"var(--text3)", marginTop:2 }}>{siteEmps.length} employees · click any cell to edit</div>
+            </div>
+            <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+              {!monthEnded && <span className="badge badge-yellow">⚠ Month in progress</span>}
+              {monthEnded && <span className="badge badge-green">✓ Month Ended</span>}
               <button className="btn btn-success btn-sm" onClick={() => downloadAttendanceExcel({ employees: siteEmps, sites, attendance, rosters, months, month, year, siteId })}>
-                ⬇ Download Excel
+                ⬇ Excel
               </button>
             </div>
           </div>
           <div className="table-wrap" style={{ overflowX: "auto" }}>
-            <table style={{ fontSize: 11, minWidth: 1000 }}>
+            <table style={{ fontSize: 11, minWidth: 900 }}>
               <thead>
                 <tr>
-                  <th style={{ minWidth: 120 }}>Employee</th>
+                  <th style={{ minWidth: 130, position:"sticky", left:0, background:"var(--surface2)", zIndex:2 }}>Employee</th>
                   {Array.from({ length: days }, (_, i) => {
                     const d = i + 1;
-                    return <th key={d} style={{ minWidth: 36 }}>{getDayName(year,month,d)}<br/>{d}</th>;
+                    const fri = isFriday(year,month,d);
+                    return <th key={d} style={{ minWidth: 32, padding:"4px 2px", color: fri?"#f87171":"inherit" }}>{getDayName(year,month,d)}<br/>{d}</th>;
                   })}
-                  <th>P</th><th>A</th><th>H</th><th>S</th><th>L</th>
+                  <th style={{ color:"#10b981" }}>P</th>
+                  <th style={{ color:"#ef4444" }}>A</th>
+                  <th style={{ color:"#f59e0b" }}>H</th>
+                  <th style={{ color:"#8b5cf6" }}>S</th>
+                  <th style={{ color:"#94a3b8" }}>L</th>
                 </tr>
               </thead>
               <tbody>
-                {siteEmps.map(e => {
+                {siteEmps.map((e,ri) => {
                   const counts = { P: 0, A: 0, H: 0, S: 0, L: 0 };
                   return (
-                    <tr key={e.id}>
-                      <td style={{ fontWeight: 600 }}>{e.name}</td>
+                    <tr key={e.id} style={{ background: ri%2===0?"var(--surface)":"var(--surface2)" }}>
+                      <td style={{ fontWeight:600, position:"sticky", left:0, background: ri%2===0?"var(--surface)":"var(--surface2)", zIndex:1, borderRight:"1px solid var(--border)" }}>
+                        <div>{e.name}</div>
+                        <div style={{ fontSize:10, color:"var(--text3)", fontFamily:"var(--mono)" }}>{e.empId}</div>
+                      </td>
                       {Array.from({ length: days }, (_, i) => {
                         const d = i + 1;
                         const a = getAtt(e.id, d);
-                        const rosterType = roster[e.id]?.[d] || "W";
-                        const st = a?.status || (rosterType === "H" ? "H" : rosterType === "L" ? "L" : "—");
-                        if (counts[st] !== undefined) counts[st]++;
+                        const rType = roster[e.id]?.[d] || (isFriday(year,month,d) ? "H" : "W");
+                        if (a?.status && counts[a.status] !== undefined) counts[a.status]++;
+                        const isHoliday = rType === "H" && !a;
+                        const isOff = rType === "O" && !a;
                         return (
-                          <td key={d} style={{ padding: 3, cursor: "pointer" }} onClick={() => startEdit(e.id, d)}>
-                            {a ? <span className={`badge ${statusColors[a.status] || "badge-gray"}`}>{a.status}</span> : <span style={{ color: "var(--text3)", fontSize: 10 }}>—</span>}
+                          <td key={d} style={{ padding:2, cursor:"pointer", textAlign:"center" }} onClick={() => startEdit(e.id, d)}>
+                            {a
+                              ? <span className={`badge ${statusColors[a.status]||"badge-gray"}`} style={{ fontSize:9, padding:"1px 4px" }}>{a.status}</span>
+                              : isHoliday ? <span style={{ color:"#06b6d4", fontSize:9 }}>PH</span>
+                              : isOff ? <span style={{ color:"#64748b", fontSize:9 }}>OFF</span>
+                              : <span style={{ color:"var(--text3)", fontSize:10 }}>—</span>}
                           </td>
                         );
                       })}
-                      <td style={{ color: "#10b981", fontWeight: 700 }}>{counts.P}</td>
-                      <td style={{ color: "#ef4444", fontWeight: 700 }}>{counts.A}</td>
-                      <td style={{ color: "#f59e0b", fontWeight: 700 }}>{counts.H}</td>
-                      <td style={{ color: "#8b5cf6", fontWeight: 700 }}>{counts.S}</td>
-                      <td style={{ color: "#94a3b8", fontWeight: 700 }}>{counts.L}</td>
+                      <td style={{ color:"#10b981", fontWeight:700, textAlign:"center" }}>{counts.P}</td>
+                      <td style={{ color:"#ef4444", fontWeight:700, textAlign:"center" }}>{counts.A}</td>
+                      <td style={{ color:"#f59e0b", fontWeight:700, textAlign:"center" }}>{counts.H}</td>
+                      <td style={{ color:"#8b5cf6", fontWeight:700, textAlign:"center" }}>{counts.S}</td>
+                      <td style={{ color:"#94a3b8", fontWeight:700, textAlign:"center" }}>{counts.L}</td>
                     </tr>
                   );
                 })}
@@ -2879,10 +3064,14 @@ function TimesheetPage({ employees, sites, attendance, setAttendance, rosters, t
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth: 400 }}>
             <div className="modal-header">
-              <div className="modal-title">Edit Attendance</div>
+              <div className="modal-title">Edit Attendance — Day {editing.day}</div>
               <button className="modal-close" onClick={() => setEditing(null)}>✕</button>
             </div>
             <div className="modal-body">
+              <div style={{ fontSize:11, color:"var(--text3)", marginBottom:12 }}>
+                {employees.find(e=>e.id===editing.empId)?.name} · {editing.dk}
+                {editing.siteKey && <span style={{ marginLeft:6 }}>@ {sites.find(s=>s.id===editing.siteKey)?.name||editing.siteKey}</span>}
+              </div>
               <div className="form-group mb-4">
                 <label className="form-label">Status</label>
                 <div className="att-status">
@@ -3563,30 +3752,615 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
 }
 
 // ============================================================
+// STATISTICS & REPORTS PAGE
+// ============================================================
+function StatisticsPage({ employees, sites, attendance, ot, rosters, deductions }) {
+  const today = new Date();
+  const [year, setYear]   = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth());
+  const [tab, setTab]     = useState("salary"); // salary | ot | attendance | headcount
+  const [siteFilter, setSiteFilter] = useState(""); // "" = all
+
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const monthKey = `${year}-${String(month+1).padStart(2,"0")}`;
+  const totalDays = getDaysInMonth(year, month);
+  const globalRoster = rosters[monthKey] || {};
+
+  // ── salary helpers (same logic as calcPayroll but site-aware) ──
+  // Daily salary expense for one employee on one day, attributed to the attendance site
+  // Returns { siteId, basic, attAllow, food, phone, accom, tea }
+  const getDailySalaryExpense = (emp, dk) => {
+    const sal = getSalaryForMonth(emp, year, month);
+    const dailyBasic    = sal.basicSalary    / (totalDays || 1);
+    const dailyAtt      = sal.attendanceAllowance / (totalDays || 1);
+    const dailyFood     = sal.foodAllowance  / (totalDays || 1);
+    const dailyPhone    = sal.phoneAllowance / (totalDays || 1);
+    const dailyAccom    = sal.accommodationAllowance / (totalDays || 1);
+
+    // Find attendance record — note which site
+    const dayData = attendance[dk] || {};
+    let foundSite = null;
+    let rec = null;
+    for (const sid of Object.keys(dayData)) {
+      if (dayData[sid]?.[emp.id]) { foundSite = sid; rec = dayData[sid][emp.id]; break; }
+    }
+    if (!rec) return null;
+
+    const status = rec.status;
+    let basic = 0, attAllow = 0;
+    if (status === "P")      { basic = dailyBasic;       attAllow = dailyAtt; }
+    else if (status === "H") { basic = dailyBasic * 0.5; attAllow = dailyAtt * 0.5; }
+    else if (status === "L") { basic = dailyBasic; }
+    // A, S → 0 basic, 0 attAllow
+
+    const rType = globalRoster[emp.id]?.[(+dk.slice(-2))] || (isFriday(year, month, +dk.slice(-2)) ? "H" : "W");
+    if (rType === "H") { basic = dailyBasic; attAllow = dailyAtt; } // holiday from roster
+
+    const tea = status === "P" ? 10 : 0;
+
+    return { siteId: foundSite, basic, attAllow, food: dailyFood, phone: dailyPhone, accom: dailyAccom, tea };
+  };
+
+  // Build site-wise salary expense summary for the month
+  const salarySiteSummary = useMemo(() => {
+    const empSet = Object.keys(globalRoster);
+    const siteMap = {}; // siteId → { basic, attAllow, food, phone, accom, tea, total }
+    const empDetails = {}; // empId → { name, empId, siteId→{...} }
+    const noSiteKey = "__nosit__";
+
+    employees.filter(e => empSet.includes(e.id)).forEach(emp => {
+      for (let d = 1; d <= totalDays; d++) {
+        const dk = `${monthKey}-${String(d).padStart(2,"0")}`;
+        if (!isEmpActiveOnDate(emp, dk)) continue;
+        const rType = globalRoster[emp.id]?.[d] || (isFriday(year, month, d) ? "H" : "W");
+
+        // Food/phone/accom are active-day-based (not site-based) — attribute to a dummy "company" row
+        // But per requirement: daily salary → site of attendance; OT → OT site
+        const exp = getDailySalaryExpense(emp, dk);
+        const sid = exp?.siteId || (rType === "H" || rType === "O" ? noSiteKey : noSiteKey);
+
+        if (!siteMap[sid]) siteMap[sid] = { basic:0, attAllow:0, food:0, phone:0, accom:0, tea:0, headcount:new Set() };
+        if (exp) {
+          siteMap[sid].basic    += exp.basic;
+          siteMap[sid].attAllow += exp.attAllow;
+          siteMap[sid].food     += exp.food;
+          siteMap[sid].phone    += exp.phone;
+          siteMap[sid].accom    += exp.accom;
+          siteMap[sid].tea      += exp.tea;
+          siteMap[sid].headcount.add(emp.id);
+        }
+
+        // Employee detail row
+        if (!empDetails[emp.id]) empDetails[emp.id] = { name:emp.name, empId:emp.empId, sites:{} };
+        if (exp) {
+          if (!empDetails[emp.id].sites[sid]) empDetails[emp.id].sites[sid] = { basic:0, attAllow:0, food:0, phone:0, accom:0, tea:0 };
+          const s = empDetails[emp.id].sites[sid];
+          s.basic    += exp.basic;
+          s.attAllow += exp.attAllow;
+          s.food     += exp.food;
+          s.phone    += exp.phone;
+          s.accom    += exp.accom;
+          s.tea      += exp.tea;
+        }
+      }
+    });
+
+    // Convert headcount sets to counts
+    Object.values(siteMap).forEach(s => { s.headcount = s.headcount.size; });
+    return { siteMap, empDetails, noSiteKey };
+  }, [employees, globalRoster, attendance, monthKey, totalDays, year, month]);
+
+  // OT site summary
+  const otSiteSummary = useMemo(() => {
+    const siteMap = {};
+    const empRows = [];
+    const empSet = Object.keys(globalRoster);
+
+    employees.filter(e => empSet.includes(e.id)).forEach(emp => {
+      const empRow = { name:emp.name, empId:emp.empId, sites:{} };
+      for (let d = 1; d <= totalDays; d++) {
+        const dk = `${monthKey}-${String(d).padStart(2,"0")}`;
+        const otDay = ot?.[dk] || {};
+        Object.entries(otDay).forEach(([sid, empMap]) => {
+          const rec = empMap[emp.id];
+          if (!rec) return;
+          const genAmt      = (rec.genOT      || 0) * (Number(emp.otRate)     || 20);
+          const concreteAmt = (rec.concreteOT || 0) * (Number(emp.concreteOT) || 200);
+          const cementAmt   = (rec.cementOT   || 0) * (Number(emp.cementOT)   || 100);
+          const total = genAmt + concreteAmt + cementAmt;
+          if (total === 0) return;
+
+          if (!siteMap[sid]) siteMap[sid] = { genOT:0, genAmt:0, concreteOT:0, concreteAmt:0, cementOT:0, cementAmt:0, total:0, headcount:new Set() };
+          siteMap[sid].genOT      += rec.genOT || 0;
+          siteMap[sid].genAmt     += genAmt;
+          siteMap[sid].concreteOT += rec.concreteOT || 0;
+          siteMap[sid].concreteAmt+= concreteAmt;
+          siteMap[sid].cementOT   += rec.cementOT || 0;
+          siteMap[sid].cementAmt  += cementAmt;
+          siteMap[sid].total      += total;
+          siteMap[sid].headcount.add(emp.id);
+
+          if (!empRow.sites[sid]) empRow.sites[sid] = { genOT:0, genAmt:0, concreteOT:0, concreteAmt:0, cementOT:0, cementAmt:0, total:0 };
+          const es = empRow.sites[sid];
+          es.genOT      += rec.genOT || 0;
+          es.genAmt     += genAmt;
+          es.concreteOT += rec.concreteOT || 0;
+          es.concreteAmt+= concreteAmt;
+          es.cementOT   += rec.cementOT || 0;
+          es.cementAmt  += cementAmt;
+          es.total      += total;
+        });
+      }
+      if (Object.keys(empRow.sites).length > 0) empRows.push(empRow);
+    });
+
+    Object.values(siteMap).forEach(s => { s.headcount = s.headcount.size; });
+    return { siteMap, empRows };
+  }, [employees, globalRoster, ot, monthKey, totalDays]);
+
+  // Attendance summary site-wise
+  const attSiteSummary = useMemo(() => {
+    const siteMap = {};
+    for (let d = 1; d <= totalDays; d++) {
+      const dk = `${monthKey}-${String(d).padStart(2,"0")}`;
+      const dayData = attendance[dk] || {};
+      Object.entries(dayData).forEach(([sid, empMap]) => {
+        if (!siteMap[sid]) siteMap[sid] = { P:0, A:0, H:0, S:0, L:0, total:0, days:new Set(), headcount:new Set() };
+        Object.entries(empMap).forEach(([eid, rec]) => {
+          if (siteMap[sid][rec.status] !== undefined) siteMap[sid][rec.status]++;
+          siteMap[sid].total++;
+          siteMap[sid].days.add(d);
+          siteMap[sid].headcount.add(eid);
+        });
+      });
+    }
+    Object.values(siteMap).forEach(s => { s.activeDays = s.days.size; s.headcount = s.headcount.size; delete s.days; });
+    return siteMap;
+  }, [attendance, monthKey, totalDays]);
+
+  // Grand totals helpers
+  const sumFields = (map, ...fields) => Object.values(map).reduce((tot, s) => { fields.forEach(f => { tot[f] = (tot[f]||0) + (s[f]||0); }); return tot; }, {});
+
+  const siteName = (sid) => {
+    if (sid === (salarySiteSummary.noSiteKey)) return "Non-site (Holiday/Off)";
+    return sites.find(s=>s.id===sid)?.name || sid;
+  };
+
+  // Excel download for salary report
+  const downloadSalaryReport = async () => {
+    const XLSX = await getXLSX();
+    const { siteMap } = salarySiteSummary;
+    const headers = ["Site","Employees","Basic (MVR)","Att. Allow (MVR)","Food (MVR)","Phone (MVR)","Accom (MVR)","Tea (MVR)","Total (MVR)"];
+    const rows = Object.entries(siteMap).map(([sid,s]) => [
+      siteName(sid), s.headcount,
+      +s.basic.toFixed(2), +s.attAllow.toFixed(2), +s.food.toFixed(2), +s.phone.toFixed(2), +s.accom.toFixed(2), +s.tea.toFixed(2),
+      +(s.basic+s.attAllow+s.food+s.phone+s.accom+s.tea).toFixed(2)
+    ]);
+    const grand = rows.reduce((t,r)=>{ r.forEach((v,i)=>{ if(i>1) t[i]=(t[i]||0)+v; }); return t; }, ["TOTAL","",0,0,0,0,0,0,0]);
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([[`Salary Expenses by Site — ${months[month]} ${year}`],[],headers,...rows,[],grand]);
+    ws["!cols"]=[{wch:24},{wch:10},{wch:14},{wch:14},{wch:12},{wch:12},{wch:12},{wch:10},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws, "Salary by Site");
+    XLSX.writeFile(wb, `SalaryBySite_${months[month]}_${year}.xlsx`);
+  };
+
+  const downloadOTReport = async () => {
+    const XLSX = await getXLSX();
+    const { siteMap } = otSiteSummary;
+    const headers = ["Site","Employees","Gen OT Hrs","Gen OT (MVR)","Concrete Units","Concrete (MVR)","Cement Units","Cement (MVR)","Total OT (MVR)"];
+    const rows = Object.entries(siteMap).map(([sid,s]) => [
+      siteName(sid), s.headcount, +s.genOT.toFixed(1), +s.genAmt.toFixed(2), s.concreteOT, +s.concreteAmt.toFixed(2), s.cementOT, +s.cementAmt.toFixed(2), +s.total.toFixed(2)
+    ]);
+    const grand = rows.reduce((t,r)=>{ r.forEach((v,i)=>{ if(i>1) t[i]=(t[i]||0)+v; }); return t; }, ["TOTAL","",0,0,0,0,0,0,0]);
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([[`OT Expenses by Site — ${months[month]} ${year}`],[],headers,...rows,[],grand]);
+    ws["!cols"]=[{wch:24},{wch:10},{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:12},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws, "OT by Site");
+    XLSX.writeFile(wb, `OTBySite_${months[month]}_${year}.xlsx`);
+  };
+
+  const TABS = [
+    { id:"salary",     label:"💰 Salary by Site" },
+    { id:"ot",         label:"⏱ OT by Site" },
+    { id:"attendance", label:"📋 Attendance by Site" },
+    { id:"headcount",  label:"👷 Headcount" },
+  ];
+
+  const filteredSites = siteFilter ? [siteFilter] : sites.map(s=>s.id);
+
+  return (
+    <div>
+      {/* Controls */}
+      <div className="card mb-4">
+        <div className="card-body">
+          <div className="gap-3" style={{ flexWrap:"wrap" }}>
+            <div className="form-group">
+              <label className="form-label">Month</label>
+              <select className="form-select" value={month} onChange={e=>setMonth(+e.target.value)}>
+                {months.map((m,i)=><option key={i} value={i}>{m}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Year</label>
+              <select className="form-select" value={year} onChange={e=>setYear(+e.target.value)}>
+                {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Site</label>
+              <select className="form-select" value={siteFilter} onChange={e=>setSiteFilter(e.target.value)}>
+                <option value="">All Sites</option>
+                {sites.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
+        {TABS.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)}
+            style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${tab===t.id?"#3b82f6":"var(--border)"}`, background: tab===t.id?"rgba(59,130,246,0.15)":"var(--surface2)", color: tab===t.id?"#3b82f6":"var(--text3)", fontFamily:"var(--font)", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── TAB: SALARY BY SITE ── */}
+      {tab === "salary" && (() => {
+        const { siteMap } = salarySiteSummary;
+        const shownSites = Object.keys(siteMap).filter(sid => !siteFilter || sid === siteFilter);
+        const grandBasic = shownSites.reduce((s,sid)=>s+(siteMap[sid]?.basic||0),0);
+        const grandTotal = shownSites.reduce((s,sid)=>s+(siteMap[sid]?.basic||0)+(siteMap[sid]?.attAllow||0)+(siteMap[sid]?.food||0)+(siteMap[sid]?.phone||0)+(siteMap[sid]?.accom||0)+(siteMap[sid]?.tea||0),0);
+
+        return (
+          <div>
+            {/* Summary cards */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:12, marginBottom:16 }}>
+              {[
+                ["💰 Total Salary Cost", grandTotal, "#10b981"],
+                ["🏗 Sites", shownSites.length, "#3b82f6"],
+                ["👷 Employees", new Set(shownSites.flatMap(sid=>[...Array(siteMap[sid]?.headcount||0)])).size, "#8b5cf6"],
+              ].map(([l,v,c])=>(
+                <div key={l} className="stat-card">
+                  <div className="stat-label">{l}</div>
+                  <div style={{ fontSize:22, fontWeight:800, color:c, fontFamily:"var(--mono)" }}>{typeof v==="number"&&v>100?`MVR ${v.toFixed(2)}`:v}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="card">
+              <div className="card-header">
+                <div className="card-title">Salary Expenses by Site — {months[month]} {year}</div>
+                <button className="btn btn-success btn-sm" onClick={downloadSalaryReport}>⬇ Download Excel</button>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Site</th><th>Staff</th><th>Basic</th><th>Att. Allow</th><th>Food</th><th>Phone</th><th>Accom.</th><th>Tea</th><th style={{ color:"#10b981" }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shownSites.length === 0
+                      ? <tr><td colSpan={9}><div className="empty-state"><p>No salary data for this period.</p></div></td></tr>
+                      : shownSites.map(sid => {
+                          const s = siteMap[sid];
+                          const rowTotal = (s.basic+s.attAllow+s.food+s.phone+s.accom+s.tea);
+                          const pct = grandTotal > 0 ? Math.round((rowTotal/grandTotal)*100) : 0;
+                          return (
+                            <tr key={sid}>
+                              <td style={{ fontWeight:600 }}>{siteName(sid)}</td>
+                              <td><span className="badge badge-blue">{s.headcount}</span></td>
+                              <td className="text-mono">{mvr(s.basic)}</td>
+                              <td className="text-mono">{mvr(s.attAllow)}</td>
+                              <td className="text-mono">{mvr(s.food)}</td>
+                              <td className="text-mono">{mvr(s.phone)}</td>
+                              <td className="text-mono">{mvr(s.accom)}</td>
+                              <td className="text-mono">{mvr(s.tea)}</td>
+                              <td>
+                                <div className="text-mono" style={{ color:"#10b981", fontWeight:700 }}>{mvr(rowTotal)}</div>
+                                <div style={{ height:4, background:"var(--surface3)", borderRadius:4, marginTop:4, overflow:"hidden", minWidth:60 }}>
+                                  <div style={{ width:`${pct}%`, height:"100%", background:"#10b981", borderRadius:4 }} />
+                                </div>
+                                <div style={{ fontSize:9, color:"var(--text3)", marginTop:2 }}>{pct}% of total</div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                    }
+                  </tbody>
+                  {shownSites.length > 0 && (
+                    <tfoot>
+                      <tr style={{ background:"rgba(59,130,246,0.08)", fontWeight:700 }}>
+                        <td>GRAND TOTAL</td>
+                        <td></td>
+                        <td className="text-mono">{mvr(shownSites.reduce((s,sid)=>s+(siteMap[sid]?.basic||0),0))}</td>
+                        <td className="text-mono">{mvr(shownSites.reduce((s,sid)=>s+(siteMap[sid]?.attAllow||0),0))}</td>
+                        <td className="text-mono">{mvr(shownSites.reduce((s,sid)=>s+(siteMap[sid]?.food||0),0))}</td>
+                        <td className="text-mono">{mvr(shownSites.reduce((s,sid)=>s+(siteMap[sid]?.phone||0),0))}</td>
+                        <td className="text-mono">{mvr(shownSites.reduce((s,sid)=>s+(siteMap[sid]?.accom||0),0))}</td>
+                        <td className="text-mono">{mvr(shownSites.reduce((s,sid)=>s+(siteMap[sid]?.tea||0),0))}</td>
+                        <td className="text-mono" style={{ color:"#10b981", fontSize:14 }}>{mvr(grandTotal)}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+
+            {/* Per-employee breakdown */}
+            {!siteFilter && shownSites.length > 0 && (
+              <div className="card" style={{ marginTop:16 }}>
+                <div className="card-header"><div className="card-title">Per-Employee Breakdown</div></div>
+                <div className="table-wrap">
+                  <table style={{ fontSize:12 }}>
+                    <thead>
+                      <tr><th>Employee</th><th>ID</th><th>Site</th><th>Basic</th><th>Att.</th><th>Food</th><th>Phone</th><th>Accom.</th><th>Tea</th><th>Total</th></tr>
+                    </thead>
+                    <tbody>
+                      {Object.values(salarySiteSummary.empDetails).flatMap(e =>
+                        Object.entries(e.sites).map(([sid, s]) => {
+                          const rowTotal = s.basic+s.attAllow+s.food+s.phone+s.accom+s.tea;
+                          return (
+                            <tr key={`${e.empId}-${sid}`}>
+                              <td style={{ fontWeight:600 }}>{e.name}</td>
+                              <td className="text-mono" style={{ color:"var(--accent)" }}>{e.empId}</td>
+                              <td style={{ fontSize:11, color:"var(--text3)" }}>{siteName(sid)}</td>
+                              <td className="text-mono">{mvr(s.basic)}</td>
+                              <td className="text-mono">{mvr(s.attAllow)}</td>
+                              <td className="text-mono">{mvr(s.food)}</td>
+                              <td className="text-mono">{mvr(s.phone)}</td>
+                              <td className="text-mono">{mvr(s.accom)}</td>
+                              <td className="text-mono">{mvr(s.tea)}</td>
+                              <td className="text-mono" style={{ fontWeight:700, color:"#10b981" }}>{mvr(rowTotal)}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── TAB: OT BY SITE ── */}
+      {tab === "ot" && (() => {
+        const { siteMap, empRows } = otSiteSummary;
+        const shownSites = Object.keys(siteMap).filter(sid => !siteFilter || sid === siteFilter);
+        const grandTotal = shownSites.reduce((s,sid)=>s+(siteMap[sid]?.total||0),0);
+
+        return (
+          <div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12, marginBottom:16 }}>
+              {[
+                ["⏱ Total OT Cost", `MVR ${grandTotal.toFixed(2)}`, "#06b6d4"],
+                ["Gen OT Hrs", shownSites.reduce((s,sid)=>s+(siteMap[sid]?.genOT||0),0).toFixed(1), "#3b82f6"],
+                ["Concrete Units", shownSites.reduce((s,sid)=>s+(siteMap[sid]?.concreteOT||0),0), "#8b5cf6"],
+                ["Cement Units", shownSites.reduce((s,sid)=>s+(siteMap[sid]?.cementOT||0),0), "#f59e0b"],
+              ].map(([l,v,c])=>(
+                <div key={l} className="stat-card">
+                  <div className="stat-label">{l}</div>
+                  <div style={{ fontSize:20, fontWeight:800, color:c, fontFamily:"var(--mono)" }}>{v}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="card">
+              <div className="card-header">
+                <div className="card-title">OT Expenses by Site — {months[month]} {year}</div>
+                <button className="btn btn-success btn-sm" onClick={downloadOTReport}>⬇ Download Excel</button>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Site</th><th>Staff</th><th>Gen OT Hrs</th><th>Gen OT</th><th>Concrete</th><th>Concrete Amt</th><th>Cement</th><th>Cement Amt</th><th style={{ color:"#06b6d4" }}>Total OT</th></tr>
+                  </thead>
+                  <tbody>
+                    {shownSites.length === 0
+                      ? <tr><td colSpan={9}><div className="empty-state"><p>No OT data for this period.</p></div></td></tr>
+                      : shownSites.map(sid => {
+                          const s = siteMap[sid];
+                          const pct = grandTotal > 0 ? Math.round((s.total/grandTotal)*100) : 0;
+                          return (
+                            <tr key={sid}>
+                              <td style={{ fontWeight:600 }}>{siteName(sid)}</td>
+                              <td><span className="badge badge-blue">{s.headcount}</span></td>
+                              <td className="text-mono">{s.genOT.toFixed(1)}</td>
+                              <td className="text-mono">{mvr(s.genAmt)}</td>
+                              <td className="text-mono">{s.concreteOT}</td>
+                              <td className="text-mono">{mvr(s.concreteAmt)}</td>
+                              <td className="text-mono">{s.cementOT}</td>
+                              <td className="text-mono">{mvr(s.cementAmt)}</td>
+                              <td>
+                                <div className="text-mono" style={{ color:"#06b6d4", fontWeight:700 }}>{mvr(s.total)}</div>
+                                <div style={{ height:4, background:"var(--surface3)", borderRadius:4, marginTop:4, overflow:"hidden" }}>
+                                  <div style={{ width:`${pct}%`, height:"100%", background:"#06b6d4", borderRadius:4 }} />
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                    }
+                  </tbody>
+                  {shownSites.length > 0 && (
+                    <tfoot>
+                      <tr style={{ background:"rgba(6,182,212,0.08)", fontWeight:700 }}>
+                        <td>GRAND TOTAL</td><td></td>
+                        <td className="text-mono">{shownSites.reduce((s,sid)=>s+(siteMap[sid]?.genOT||0),0).toFixed(1)}</td>
+                        <td className="text-mono">{mvr(shownSites.reduce((s,sid)=>s+(siteMap[sid]?.genAmt||0),0))}</td>
+                        <td className="text-mono">{shownSites.reduce((s,sid)=>s+(siteMap[sid]?.concreteOT||0),0)}</td>
+                        <td className="text-mono">{mvr(shownSites.reduce((s,sid)=>s+(siteMap[sid]?.concreteAmt||0),0))}</td>
+                        <td className="text-mono">{shownSites.reduce((s,sid)=>s+(siteMap[sid]?.cementOT||0),0)}</td>
+                        <td className="text-mono">{mvr(shownSites.reduce((s,sid)=>s+(siteMap[sid]?.cementAmt||0),0))}</td>
+                        <td className="text-mono" style={{ color:"#06b6d4", fontSize:14 }}>{mvr(grandTotal)}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+
+            {/* Per-employee OT breakdown */}
+            {empRows.length > 0 && (
+              <div className="card" style={{ marginTop:16 }}>
+                <div className="card-header"><div className="card-title">Per-Employee OT Detail</div></div>
+                <div className="table-wrap">
+                  <table style={{ fontSize:12 }}>
+                    <thead><tr><th>Employee</th><th>ID</th><th>OT Site</th><th>Gen OT</th><th>Gen Amt</th><th>Concrete</th><th>Concrete Amt</th><th>Cement</th><th>Cement Amt</th><th>Total</th></tr></thead>
+                    <tbody>
+                      {empRows.filter(e=>!siteFilter||e.sites[siteFilter]).flatMap(e=>
+                        Object.entries(e.sites).filter(([sid])=>!siteFilter||sid===siteFilter).map(([sid,s])=>(
+                          <tr key={`${e.empId}-${sid}`}>
+                            <td style={{ fontWeight:600 }}>{e.name}</td>
+                            <td className="text-mono" style={{ color:"var(--accent)" }}>{e.empId}</td>
+                            <td style={{ fontSize:11, color:"var(--text3)" }}>{siteName(sid)}</td>
+                            <td className="text-mono">{s.genOT.toFixed(1)}</td>
+                            <td className="text-mono">{mvr(s.genAmt)}</td>
+                            <td className="text-mono">{s.concreteOT}</td>
+                            <td className="text-mono">{mvr(s.concreteAmt)}</td>
+                            <td className="text-mono">{s.cementOT}</td>
+                            <td className="text-mono">{mvr(s.cementAmt)}</td>
+                            <td className="text-mono" style={{ fontWeight:700, color:"#06b6d4" }}>{mvr(s.total)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── TAB: ATTENDANCE BY SITE ── */}
+      {tab === "attendance" && (() => {
+        const shownSites = Object.keys(attSiteSummary).filter(sid=>!siteFilter||sid===siteFilter);
+        const grandTotal = shownSites.reduce((s,sid)=>s+(attSiteSummary[sid]?.total||0),0);
+
+        return (
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">Attendance Summary by Site — {months[month]} {year}</div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Site</th><th>Staff</th><th>Active Days</th><th style={{ color:"#10b981" }}>Present</th><th style={{ color:"#ef4444" }}>Absent</th><th style={{ color:"#f59e0b" }}>Half</th><th style={{ color:"#8b5cf6" }}>Sick</th><th style={{ color:"#94a3b8" }}>Leave</th><th>Total Entries</th><th>Att. Rate</th></tr>
+                </thead>
+                <tbody>
+                  {shownSites.length === 0
+                    ? <tr><td colSpan={10}><div className="empty-state"><p>No attendance data for this period.</p></div></td></tr>
+                    : shownSites.map(sid => {
+                        const s = attSiteSummary[sid];
+                        const rate = s.total > 0 ? Math.round((s.P / s.total) * 100) : 0;
+                        return (
+                          <tr key={sid}>
+                            <td style={{ fontWeight:600 }}>{siteName(sid)}</td>
+                            <td><span className="badge badge-blue">{s.headcount}</span></td>
+                            <td className="text-mono">{s.activeDays}</td>
+                            <td><span className="badge badge-green">{s.P}</span></td>
+                            <td><span className="badge badge-red">{s.A}</span></td>
+                            <td><span className="badge badge-yellow">{s.H}</span></td>
+                            <td><span className="badge badge-purple">{s.S||0}</span></td>
+                            <td><span className="badge badge-gray">{s.L}</span></td>
+                            <td className="text-mono">{s.total}</td>
+                            <td>
+                              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                                <div style={{ width:60, height:6, background:"var(--surface3)", borderRadius:3, overflow:"hidden" }}>
+                                  <div style={{ width:`${rate}%`, height:"100%", background: rate>80?"#10b981":rate>60?"#f59e0b":"#ef4444", borderRadius:3 }} />
+                                </div>
+                                <span style={{ fontSize:11, fontWeight:700 }}>{rate}%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── TAB: HEADCOUNT ── */}
+      {tab === "headcount" && (
+        <div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:16 }}>
+            {Object.entries(EMP_STATUS_META).map(([k,v])=>(
+              <div key={k} className="stat-card" style={{ borderLeft:`3px solid ${v.color}` }}>
+                <div className="stat-label">{v.icon} {v.label}</div>
+                <div style={{ fontSize:28, fontWeight:800, color:v.color, fontFamily:"var(--mono)" }}>
+                  {employees.filter(e=>(e.empStatus||"active")===k).length}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="card">
+            <div className="card-header"><div className="card-title">Employee Headcount Report — {months[month]} {year}</div></div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Employee</th><th>ID</th><th>Designation</th><th>Status</th><th>Status Since</th><th>Basic Salary</th><th>In Roster</th></tr></thead>
+                <tbody>
+                  {employees.map(e=>{
+                    const meta = EMP_STATUS_META[e.empStatus||"active"]||{};
+                    const inRoster = !!globalRoster[e.id];
+                    const sal = getSalaryForMonth(e, year, month);
+                    return (
+                      <tr key={e.id}>
+                        <td style={{ fontWeight:600 }}>{e.name}</td>
+                        <td className="text-mono" style={{ color:"var(--accent)" }}>{e.empId}</td>
+                        <td>{e.designation||"—"}</td>
+                        <td><span className={`badge ${meta.badge}`}>{meta.icon} {meta.label}</span></td>
+                        <td style={{ fontSize:11, color:"var(--text3)" }}>{e.statusDate||"—"}</td>
+                        <td className="text-mono">{mvr(sal.basicSalary)}</td>
+                        <td>{inRoster ? <span className="badge badge-green">✓</span> : <span className="badge badge-gray">—</span>}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN APP
 // ============================================================
 const ALL_NAV = [
-  { id: "dashboard", icon: "⊞", label: "Dashboard",   group: "Overview",    roles: ["manager","supervisor"] },
-  { id: "sites",     icon: "🏗", label: "Work Sites",  group: "Setup",       roles: ["manager"] },
-  { id: "employees", icon: "👷", label: "Employees",   group: "Setup",       roles: ["manager","supervisor"] },
-  { id: "deductions",icon: "💳", label: "Deductions",  group: "Setup",       roles: ["manager"] },
-  { id: "roster",    icon: "📋", label: "Duty Roster", group: "Operations",  roles: ["manager","supervisor"] },
-  { id: "attendance",icon: "✓",  label: "Attendance",  group: "Operations",  roles: ["manager","supervisor"] },
-  { id: "otentry",   icon: "⏱", label: "OT Entry",    group: "Operations",  roles: ["manager","supervisor"] },
-  { id: "timesheet", icon: "📊", label: "Timesheet",   group: "Operations",  roles: ["manager","supervisor"] },
-  { id: "payroll",   icon: "💰", label: "Payroll",     group: "Payroll",     roles: ["manager"] },
+  { id: "dashboard",  icon: "⊞", label: "Dashboard",   group: "Overview",    roles: ["manager","supervisor"] },
+  { id: "sites",      icon: "🏗", label: "Work Sites",  group: "Setup",       roles: ["manager"] },
+  { id: "employees",  icon: "👷", label: "Employees",   group: "Setup",       roles: ["manager","supervisor"] },
+  { id: "deductions", icon: "💳", label: "Deductions",  group: "Setup",       roles: ["manager"] },
+  { id: "roster",     icon: "📋", label: "Duty Roster", group: "Operations",  roles: ["manager","supervisor"] },
+  { id: "attendance", icon: "✓",  label: "Attendance",  group: "Operations",  roles: ["manager","supervisor"] },
+  { id: "otentry",    icon: "⏱", label: "OT Entry",    group: "Operations",  roles: ["manager","supervisor"] },
+  { id: "timesheet",  icon: "📊", label: "Timesheet",   group: "Operations",  roles: ["manager","supervisor"] },
+  { id: "payroll",    icon: "💰", label: "Payroll",     group: "Payroll",     roles: ["manager"] },
+  { id: "statistics", icon: "📈", label: "Statistics",  group: "Reports",     roles: ["manager"] },
 ];
 
 const PAGE_TITLES = {
-  dashboard: ["Dashboard",       "Overview of attendance and workforce"],
-  sites:     ["Work Sites",      "Manage construction sites"],
-  employees: ["Employees",       "Employee records and salary details"],
-  deductions:["Deductions",      "Utility, advances, and loan installments"],
-  roster:    ["Duty Roster",     "Monthly schedule planning"],
-  attendance:["Daily Attendance","Mark attendance status per site"],
-  otentry:   ["OT Entry",        "Enter overtime — can be at a different site"],
-  timesheet: ["Timesheet Review","Review and edit monthly timesheets"],
-  payroll:   ["Payroll",         "Generate salary slips and payroll"],
+  dashboard:  ["Dashboard",        "Overview of attendance and workforce"],
+  sites:      ["Work Sites",       "Manage construction sites"],
+  employees:  ["Employees",        "Employee records and salary details"],
+  deductions: ["Deductions",       "Utility, advances, and loan installments"],
+  roster:     ["Duty Roster",      "Monthly schedule planning"],
+  attendance: ["Daily Attendance", "Mark attendance status per site"],
+  otentry:    ["OT Entry",         "Enter overtime — can be at a different site"],
+  timesheet:  ["Timesheet Review", "Review and edit monthly timesheets"],
+  payroll:    ["Payroll",          "Generate salary slips and payroll"],
+  statistics: ["Statistics & Reports", "Salary expenses, OT costs, and headcount reports by site"],
 };
 
 export default function App() {
@@ -3780,7 +4554,7 @@ export default function App() {
           </div>
 
           <div className="page-content">
-            {page === "dashboard"  && <Dashboard employees={employees} sites={sites} attendance={attendance} rosters={rosters} />}
+            {page === "dashboard"  && <Dashboard employees={employees} sites={sites} attendance={attendance} rosters={rosters} ot={ot} />}
             {page === "sites"      && <SitesPage sites={sites} setSites={setSites} toast={toast} />}
             {page === "employees"  && <EmployeesPage employees={employees} setEmployees={setEmployees} toast={toast} user={user} />}
             {page === "deductions" && <DeductionsPage employees={employees} deductions={deductions} setDeductions={setDeductions} toast={toast} />}
@@ -3789,6 +4563,7 @@ export default function App() {
             {page === "otentry"    && <OTEntryPage employees={employees} sites={sites} attendance={attendance} ot={ot} setOt={setOt} rosters={rosters} toast={toast} />}
             {page === "timesheet"  && <TimesheetPage employees={employees} sites={sites} attendance={attendance} setAttendance={setAttendance} rosters={rosters} toast={toast} />}
             {page === "payroll"    && <PayrollPage employees={employees} sites={sites} attendance={attendance} ot={ot} rosters={rosters} deductions={deductions} toast={toast} />}
+            {page === "statistics" && <StatisticsPage employees={employees} sites={sites} attendance={attendance} ot={ot} rosters={rosters} deductions={deductions} />}
           </div>
         </main>
       </div>
