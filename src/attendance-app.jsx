@@ -771,7 +771,36 @@ const EMPTY_EMP = {
   foodAllowance: "", phoneAllowance: "",
   otRate: 20, concreteOT: 200, cementOT: 100, teaRate: 10,
   joinDate: "", empStatus: "active", statusDate: "", statusNote: "",
+  salaryHistory: [], // [{ effectiveDate, basicSalary, attendanceAllowance, accommodationAllowance, foodAllowance, phoneAllowance }]
 };
+
+// Get the salary record effective for a given month (YYYY-MM-DD = first day of month)
+// Looks through salaryHistory sorted descending by effectiveDate, picks the first one <= targetDate
+// Falls back to the employee's current salary fields if no history entry matches
+function getSalaryForMonth(emp, year, month) {
+  const targetDate = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const history = emp.salaryHistory || [];
+  // Sort descending by effectiveDate
+  const sorted = [...history].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+  const match = sorted.find(h => h.effectiveDate <= targetDate);
+  if (match) {
+    return {
+      basicSalary:             Number(match.basicSalary)            || 0,
+      attendanceAllowance:     Number(match.attendanceAllowance)    || 0,
+      accommodationAllowance:  Number(match.accommodationAllowance) || 0,
+      foodAllowance:           Number(match.foodAllowance)          || 0,
+      phoneAllowance:          Number(match.phoneAllowance)         || 0,
+    };
+  }
+  // Fallback: use current salary fields on the employee record
+  return {
+    basicSalary:             Number(emp.basicSalary)            || 0,
+    attendanceAllowance:     Number(emp.attendanceAllowance)    || 0,
+    accommodationAllowance:  Number(emp.accommodationAllowance) || 0,
+    foodAllowance:           Number(emp.foodAllowance)          || 0,
+    phoneAllowance:          Number(emp.phoneAllowance)         || 0,
+  };
+}
 
 const EMP_STATUS_META = {
   active:  { label: "Active",   badge: "badge-green",  color: "#10b981", icon: "✓" },
@@ -795,8 +824,36 @@ function isEmpActiveOnDate(emp, dateStr) {
 }
 
 function EmployeeModal({ emp, onSave, onClose }) {
-  const [form, setForm] = useState(emp ? { ...emp } : { ...EMPTY_EMP });
+  const [form, setForm] = useState(emp ? { ...emp, salaryHistory: emp.salaryHistory || [] } : { ...EMPTY_EMP });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  // Salary history helpers
+  const [newHistEntry, setNewHistEntry] = useState({
+    effectiveDate: "", basicSalary: "", attendanceAllowance: "",
+    accommodationAllowance: "", foodAllowance: "", phoneAllowance: ""
+  });
+  const [showAddHist, setShowAddHist] = useState(false);
+
+  const addHistEntry = () => {
+    if (!newHistEntry.effectiveDate) return alert("Effective date is required");
+    const entry = {
+      effectiveDate:           newHistEntry.effectiveDate,
+      basicSalary:             newHistEntry.basicSalary            || form.basicSalary,
+      attendanceAllowance:     newHistEntry.attendanceAllowance    || form.attendanceAllowance,
+      accommodationAllowance:  newHistEntry.accommodationAllowance || form.accommodationAllowance,
+      foodAllowance:           newHistEntry.foodAllowance          || form.foodAllowance,
+      phoneAllowance:          newHistEntry.phoneAllowance         || form.phoneAllowance,
+    };
+    const updated = [...(form.salaryHistory || []).filter(h => h.effectiveDate !== entry.effectiveDate), entry]
+      .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+    setForm(p => ({ ...p, salaryHistory: updated }));
+    setNewHistEntry({ effectiveDate: "", basicSalary: "", attendanceAllowance: "", accommodationAllowance: "", foodAllowance: "", phoneAllowance: "" });
+    setShowAddHist(false);
+  };
+
+  const removeHistEntry = (date) => {
+    setForm(p => ({ ...p, salaryHistory: (p.salaryHistory || []).filter(h => h.effectiveDate !== date) }));
+  };
 
   return (
     <div className="modal-overlay">
@@ -897,6 +954,89 @@ function EmployeeModal({ emp, onSave, onClose }) {
               </div>
             </div>
           </div>
+          <div className="form-section">
+            <div className="form-section-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Salary History</span>
+              <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => setShowAddHist(p => !p)}>
+                {showAddHist ? "✕ Cancel" : "+ Add Entry"}
+              </button>
+            </div>
+
+            {/* Add new history entry form */}
+            {showAddHist && (
+              <div style={{ background: "var(--surface3)", borderRadius: 10, padding: 14, marginBottom: 12, border: "1px solid var(--border)" }}>
+                <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>New Salary Entry</div>
+                <div className="form-grid form-grid-2" style={{ marginBottom: 10 }}>
+                  <div className="form-group" style={{ gridColumn: "1 / -1" }}>
+                    <label className="form-label">Effective Date *</label>
+                    <input className="form-input" type="date" value={newHistEntry.effectiveDate} onChange={e => setNewHistEntry(p => ({ ...p, effectiveDate: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Basic Salary</label>
+                    <input className="form-input" type="number" placeholder={form.basicSalary || "0"} value={newHistEntry.basicSalary} onChange={e => setNewHistEntry(p => ({ ...p, basicSalary: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Attendance Allow.</label>
+                    <input className="form-input" type="number" placeholder={form.attendanceAllowance || "0"} value={newHistEntry.attendanceAllowance} onChange={e => setNewHistEntry(p => ({ ...p, attendanceAllowance: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Accommodation Allow.</label>
+                    <input className="form-input" type="number" placeholder={form.accommodationAllowance || "0"} value={newHistEntry.accommodationAllowance} onChange={e => setNewHistEntry(p => ({ ...p, accommodationAllowance: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Food Allow.</label>
+                    <input className="form-input" type="number" placeholder={form.foodAllowance || "0"} value={newHistEntry.foodAllowance} onChange={e => setNewHistEntry(p => ({ ...p, foodAllowance: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Phone Allow.</label>
+                    <input className="form-input" type="number" placeholder={form.phoneAllowance || "0"} value={newHistEntry.phoneAllowance} onChange={e => setNewHistEntry(p => ({ ...p, phoneAllowance: e.target.value }))} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 8 }}>Leave blank fields to copy current salary values.</div>
+                <button className="btn btn-primary btn-sm" onClick={addHistEntry}>Save Entry</button>
+              </div>
+            )}
+
+            {/* History list */}
+            {(form.salaryHistory || []).length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--text3)", padding: "10px 0" }}>No salary history. Current salary fields are used for all payroll calculations.</div>
+            ) : (
+              <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: "var(--surface3)" }}>
+                      <th style={{ padding: "7px 10px", textAlign: "left", fontWeight: 700, color: "var(--text3)", fontSize: 11 }}>Effective</th>
+                      <th style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700, color: "var(--text3)", fontSize: 11 }}>Basic</th>
+                      <th style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700, color: "var(--text3)", fontSize: 11 }}>Att.</th>
+                      <th style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700, color: "var(--text3)", fontSize: 11 }}>Accom.</th>
+                      <th style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700, color: "var(--text3)", fontSize: 11 }}>Food</th>
+                      <th style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700, color: "var(--text3)", fontSize: 11 }}>Phone</th>
+                      <th style={{ padding: "7px 4px", textAlign: "center", fontWeight: 700, color: "var(--text3)", fontSize: 11 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(form.salaryHistory || []).sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate)).map((h, i) => (
+                      <tr key={h.effectiveDate} style={{ borderTop: "1px solid var(--border)", background: i === 0 ? "rgba(59,130,246,0.06)" : "transparent" }}>
+                        <td style={{ padding: "7px 10px", fontWeight: 600, color: i === 0 ? "var(--accent)" : "var(--text)" }}>{h.effectiveDate}{i === 0 && <span style={{ fontSize: 9, marginLeft: 4, color: "var(--accent)", fontWeight: 700, textTransform: "uppercase" }}>latest</span>}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "var(--mono)" }}>{h.basicSalary}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "var(--mono)" }}>{h.attendanceAllowance}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "var(--mono)" }}>{h.accommodationAllowance}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "var(--mono)" }}>{h.foodAllowance}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "var(--mono)" }}>{h.phoneAllowance}</td>
+                        <td style={{ padding: "7px 6px", textAlign: "center" }}>
+                          <button onClick={() => removeHistEntry(h.effectiveDate)} style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", fontSize: 13 }}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>
+              💡 Payroll uses the salary entry whose effective date is on or before the month being calculated. Add a new entry when a salary increment takes effect.
+            </div>
+          </div>
+
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
@@ -3027,7 +3167,22 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
           else if (a.status === "A") absentDays++;
           else if (a.status === "H") halfDays++;
           else if (a.status === "S") { sickDays++; } // sick tracked separately
-          else if (a.status === "L") leaveDays++;
+          else if (a.status === "L") {
+            // Fix 3: Days 1-30 of leave → leaveDays (basic only)
+            // Day 31+ of consecutive leave → absentDays (no basic, no allowances)
+            if (emp.empStatus === "leave" && emp.statusDate) {
+              const leaveStart = new Date(emp.statusDate + "T00:00:00");
+              const thisDay    = new Date(dk + "T00:00:00");
+              const daysDiff   = Math.floor((thisDay - leaveStart) / (1000 * 60 * 60 * 24));
+              if (daysDiff >= 30) {
+                absentDays++; // treated as absent after 30 consecutive leave days
+              } else {
+                leaveDays++;
+              }
+            } else {
+              leaveDays++;
+            }
+          }
           minutesLate += a.minutesLate || 0;
         } else if (mode === "projected") {
           // Projected mode — assume present for days not yet entered
@@ -3044,11 +3199,13 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
       }
     }
 
-    const basicSalary      = Number(emp.basicSalary) || 0;
-    const attendanceAllow_ = Number(emp.attendanceAllowance) || 0;
-    const foodAllow_       = Number(emp.foodAllowance) || 0;
-    const phoneAllow_      = Number(phoneAllowances[emp.id] ?? emp.phoneAllowance) || 0;
-    const accommodationAllow_ = Number(emp.accommodationAllowance) || 0;
+    // Fix 1: Look up salary from history for the month being calculated
+    const salaryRec        = getSalaryForMonth(emp, year, month);
+    const basicSalary      = salaryRec.basicSalary;
+    const attendanceAllow_ = salaryRec.attendanceAllowance;
+    const foodAllow_       = salaryRec.foodAllowance;
+    const phoneAllow_      = Number(phoneAllowances[emp.id] ?? salaryRec.phoneAllowance) || 0;
+    const accommodationAllow_ = salaryRec.accommodationAllowance;
 
     // Daily rates — always based on total days in month
     const dailyBasic    = basicSalary      / (totalDays || 1);
@@ -3310,6 +3467,17 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
                     </div>
                   </div>
 
+                  {(() => {
+                    const salaryRec = getSalaryForMonth(selected, year, month);
+                    const histEntry = (selected.salaryHistory || [])
+                      .filter(h => h.effectiveDate <= `${year}-${String(month+1).padStart(2,"0")}-01`)
+                      .sort((a,b) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
+                    return histEntry ? (
+                      <div style={{ padding: "6px 20px", background: "rgba(59,130,246,0.08)", borderBottom: "1px solid rgba(59,130,246,0.15)", fontSize: 11, color: "#93c5fd", display: "flex", alignItems: "center", gap: 6 }}>
+                        📅 Salary from history entry effective <strong>{histEntry.effectiveDate}</strong> — Basic: MVR {salaryRec.basicSalary}
+                      </div>
+                    ) : null;
+                  })()}
                   <div style={{ padding: "12px 0" }}>
                     <div style={{ padding: "4px 20px 8px", fontSize: 10, fontWeight: 700, color: "#06b6d4", letterSpacing: 1, textTransform: "uppercase" }}>Earnings</div>
                     {[
