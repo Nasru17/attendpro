@@ -2563,7 +2563,7 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
           if (a.status === "P") presentDays++;
           else if (a.status === "A") absentDays++;
           else if (a.status === "H") halfDays++;
-          else if (a.status === "S") { sickDays++; absentDays++; }
+          else if (a.status === "S") { sickDays++; } // sick tracked separately
           else if (a.status === "L") leaveDays++;
           minutesLate += a.minutesLate || 0;
         } else if (mode === "projected") {
@@ -2594,19 +2594,20 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
     const dailyPhone    = phoneAllow_       / (totalDays || 1);
     const dailyAccom    = accommodationAllow_ / (totalDays || 1);
 
-    // Days for allowance calculation — holidays + entered/projected work days - leave days
-    const paidWorkDays  = presentDays + halfDays + absentDays; // all non-leave entered work days
-    const paidAllowDays = holidayDays + presentDays; // days food/phone/accom paid (not leave, not absent, not off)
-
     // Basic salary breakdown
-    const basicForWork    = dailyBasic * (presentDays + halfDays * 0.5); // present + half
+    // sick = no basic (like absent), half = half basic, leave = basic only, absent = no basic
+    const basicForWork    = dailyBasic * (presentDays + halfDays * 0.5); // present full + half at 50%
     const basicForLeave   = dailyBasic * leaveDays;                       // leave = basic only
-    const basicForHoliday = dailyBasic * holidayDays;                     // holidays
-    // absent days = no basic
+    const basicForHoliday = dailyBasic * holidayDays;                     // holidays = basic
+    // absent + sick days = no basic
     const basicEarned     = basicForWork + basicForLeave + basicForHoliday;
 
-    // Attendance allowance — only present + holiday days
-    const attAllowEarned  = dailyAttAllow * (presentDays + holidayDays);
+    // Attendance allowance:
+    // - Present (full day) → full daily att allowance
+    // - Half day → half daily att allowance
+    // - Holiday → full daily att allowance
+    // - Sick, Absent, Leave, Off → NO attendance allowance
+    const attAllowEarned  = dailyAttAllow * (presentDays + halfDays * 0.5 + holidayDays);
 
     // Holiday OT
     const holidayAllowBelow = holidayOTBelow * 30;
@@ -2621,10 +2622,13 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
     const concreteOTAmount = concreteOT * (Number(emp.concreteOT) || 200);
     const cementOTAmount   = cementOT   * (Number(emp.cementOT)   || 100);
 
-    // Food, phone, accommodation — paid for present + holiday days (not leave, absent, off)
-    const foodAllow        = +(dailyFood  * paidAllowDays).toFixed(2);
-    const phoneAllow       = +(dailyPhone * paidAllowDays).toFixed(2);
-    const accommodationAllow = +(dailyAccom * paidAllowDays).toFixed(2);
+    // Food, phone, accommodation:
+    // Paid as full monthly amount as long as employee is active.
+    // If status changed mid-month, pro-rate by activeDays / totalDays only.
+    // NOT affected by present/absent/leave/sick — only by active status.
+    const foodAllow        = +(dailyFood  * activeDays).toFixed(2);
+    const phoneAllow       = +(dailyPhone * activeDays).toFixed(2);
+    const accommodationAllow = +(dailyAccom * activeDays).toFixed(2);
 
     // Tea — present days only
     const teaAllow = presentDays * 10;
@@ -2646,7 +2650,7 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
 
     return {
       presentDays, absentDays, halfDays, sickDays, leaveDays, holidayDays, offDays,
-      enteredWorkDays, activeDays, paidAllowDays, upTo,
+      enteredWorkDays, activeDays, upTo,
       genOT, concreteOT, cementOT, minutesLate,
       holidayOTBelow, holidayOTFull, holidayAllowBelow, holidayAllowFull,
       basicEarned, basicForWork, basicForLeave, basicForHoliday,
@@ -2846,19 +2850,19 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
                   <div style={{ padding: "12px 0" }}>
                     <div style={{ padding: "4px 20px 8px", fontSize: 10, fontWeight: 700, color: "#06b6d4", letterSpacing: 1, textTransform: "uppercase" }}>Earnings</div>
                     {[
-                      ["Basic Salary (Work Days)", p.basicForWork, `${p.workDays - p.absentDays} days × ${mvr(p.dailyBasic)}/day`],
-                      ["Basic Salary (Leave Days)", p.basicForLeave, `${p.leaveDays} leave days × ${mvr(p.dailyBasic)}/day`],
+                      ["Basic Salary (Work Days)", p.basicForWork, `${p.presentDays}P + ${p.halfDays}×½ days × ${mvr(p.dailyBasic)}/day`],
+                      ["Basic Salary (Leave Days)", p.basicForLeave, `${p.leaveDays} days × ${mvr(p.dailyBasic)}/day`],
                       ["Basic Salary (Holidays)", p.basicForHoliday, `${p.holidayDays} days × ${mvr(p.dailyBasic)}/day`],
-                      ["Attendance Allowance", p.attendanceAllow, `${p.presentDays + p.holidayDays} days × ${mvr(p.dailyAttAllow)}/day`],
+                      ["Attendance Allowance", p.attendanceAllow, `${p.presentDays}P + ${p.halfDays}×½ + ${p.holidayDays}H days × ${mvr(p.dailyAttAllow)}/day`],
                       ...(p.holidayAllowBelow > 0 ? [["Holiday OT (< 9.5 hrs)", p.holidayAllowBelow, `${p.holidayOTBelow.toFixed(1)} hrs × MVR30`]] : []),
                       ...(p.holidayAllowFull  > 0 ? [["Holiday OT (≥ 9.5 hrs)", p.holidayAllowFull,  `${p.holidayOTFull} day(s) × 1.5× attendance`]] : []),
                       ["General OT", p.genOTAmount, `${p.genOT} hrs`],
                       ["Concrete OT", p.concreteOTAmount, `${p.concreteOT} units`],
                       ["Cement OT", p.cementOTAmount, `${p.cementOT} units`],
-                      ["Accommodation Allowance", p.accommodationAllow, `${p.paidAllowDays} days × ${mvr(p.dailyAccom)}/day`],
-                      ["Food Allowance", p.foodAllow, `${p.paidAllowDays} days × ${mvr(p.dailyFood)}/day`],
-                      ["Tea Allowance", p.teaAllow, `${p.presentDays} days × MVR10`],
-                      ["Phone Allowance", p.phoneAllow, `${p.paidAllowDays} days × ${mvr(p.dailyPhone)}/day`],
+                      ["Accommodation Allowance", p.accommodationAllow, `${p.activeDays} active days × ${mvr(p.dailyAccom)}/day`],
+                      ["Food Allowance", p.foodAllow, `${p.activeDays} active days × ${mvr(p.dailyFood)}/day`],
+                      ["Tea Allowance", p.teaAllow, `${p.presentDays} present days × MVR10`],
+                      ["Phone Allowance", p.phoneAllow, `${p.activeDays} active days × ${mvr(p.dailyPhone)}/day`],
                       ...(p.bonusAmount > 0 ? [[p.bonusName || "Bonus", p.bonusAmount]] : []),
                     ].filter(r => r[1] > 0).map(([l, v, note]) => (
                       <div key={l} className="payslip-row">
