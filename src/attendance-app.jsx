@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 // ============================================================
 // EXCEL EXPORT — loads SheetJS from CDN on first use
@@ -318,14 +318,19 @@ async function load(key) {
   } catch { return null; }
 }
 
-async function save(key, val) {
+// save now requires a valid user token — returns true on success, false if session expired
+async function save(key, val, token) {
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/attendpro_store`, {
+    // Use user token if available so RLS can be enforced in future; fall back to anon
+    const authHeader = token ? `Bearer ${token}` : `Bearer ${SUPABASE_KEY}`;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/attendpro_store`, {
       method: "POST",
-      headers: { ...SB_HEADERS, "Prefer": "resolution=merge-duplicates" },
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": authHeader, "Prefer": "resolution=merge-duplicates" },
       body: JSON.stringify({ key, value: val, updated_at: new Date().toISOString() })
     });
-  } catch {}
+    if (res.status === 401 || res.status === 403) return false; // session expired
+    return true;
+  } catch { return false; }
 }
 
 // ============================================================
@@ -3383,18 +3388,34 @@ export default function App() {
   const [rosters, setRosters] = useState({});
   const [deductions, setDeductions] = useState({});
   const [loaded, setLoaded] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const { toasts, toast } = useToast();
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
 
+  // Verify session with Supabase — returns user or null
+  const verifySession = async (token) => {
+    if (!token) return null;
+    const sbUser = await sbGetUser(token);
+    return sbUser || null;
+  };
+
+  // Force logout when session expires
+  const forceExpire = () => {
+    localStorage.removeItem("att:session");
+    setUser(null);
+    setSessionExpired(true);
+  };
+
+  // Initial load
   useEffect(() => {
     (async () => {
-      // Verify saved session token with Supabase
       const savedSession = localStorage.getItem("att:session");
       if (savedSession) {
         try {
           const session = JSON.parse(savedSession);
-          const sbUser = await sbGetUser(session.token);
+          const sbUser = await verifySession(session.token);
           if (sbUser) {
-            // Refresh role from latest metadata in case it changed
             const roleInfo = getRoleInfo(sbUser);
             setUser({ ...session, ...roleInfo });
           } else {
@@ -3404,7 +3425,6 @@ export default function App() {
           localStorage.removeItem("att:session");
         }
       }
-      // Load app data from Supabase
       const [e, s, a, r, d, o] = await Promise.all([
         load(KEYS.employees), load(KEYS.sites), load(KEYS.attendance),
         load(KEYS.rosters), load(KEYS.deductions), load(KEYS.ot)
@@ -3419,15 +3439,35 @@ export default function App() {
     })();
   }, []);
 
-  useEffect(() => { if (loaded) save(KEYS.employees, employees); }, [employees, loaded]);
-  useEffect(() => { if (loaded) save(KEYS.sites, sites); }, [sites, loaded]);
-  useEffect(() => { if (loaded) save(KEYS.attendance, attendance); }, [attendance, loaded]);
-  useEffect(() => { if (loaded) save(KEYS.rosters, rosters); }, [rosters, loaded]);
-  useEffect(() => { if (loaded) save(KEYS.deductions, deductions); }, [deductions, loaded]);
-  useEffect(() => { if (loaded) save(KEYS.ot, ot); }, [ot, loaded]);
+  // Periodic session check every 4 minutes
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const u = userRef.current;
+      if (!u?.token) return;
+      const sbUser = await verifySession(u.token);
+      if (!sbUser) forceExpire();
+    }, 4 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Save helper — checks session before saving
+  const saveData = async (key, val) => {
+    const u = userRef.current;
+    if (!u?.token) { forceExpire(); return; }
+    const ok = await save(key, val, u.token);
+    if (!ok) forceExpire();
+  };
+
+  useEffect(() => { if (loaded) saveData(KEYS.employees, employees); }, [employees, loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.sites, sites); }, [sites, loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.attendance, attendance); }, [attendance, loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.rosters, rosters); }, [rosters, loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.deductions, deductions); }, [deductions, loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.ot, ot); }, [ot, loaded]);
 
   const handleLogin = (u) => {
     localStorage.setItem("att:session", JSON.stringify(u));
+    setSessionExpired(false);
     setUser(u);
   };
 
@@ -3444,7 +3484,23 @@ export default function App() {
     </div>
   );
 
-  if (!user) return <><style>{CSS}</style><LoginPage onLogin={handleLogin} /></>;
+  // Session expired overlay — shown on top of app so user sees the warning clearly
+  if (sessionExpired || !user) return (
+    <>
+      <style>{CSS}</style>
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+        <div style={{ background:"var(--surface)", borderRadius:16, padding:32, maxWidth:400, width:"100%", textAlign:"center", border:"1px solid #ef4444" }}>
+          <div style={{ fontSize:40, marginBottom:12 }}>🔒</div>
+          <div style={{ fontWeight:800, fontSize:18, color:"#ef4444", marginBottom:8 }}>Session Expired</div>
+          <div style={{ fontSize:14, color:"var(--text3)", marginBottom:24, lineHeight:1.6 }}>
+            Your login session has expired. Please sign in again to continue.<br/>
+            <span style={{ color:"var(--warning)", fontSize:12 }}>⚠ Any unsaved data from this session was not saved to the database.</span>
+          </div>
+          <LoginPage onLogin={handleLogin} />
+        </div>
+      </div>
+    </>
+  );
 
   const NAV = ALL_NAV.filter(n => n.roles.includes(user.role));
   const groups = [...new Set(NAV.map(n => n.group))];
