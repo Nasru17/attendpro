@@ -376,8 +376,13 @@ const CSS = `
   }
   .login-card {
     background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
-    width: 100%; max-width: 400px; padding: 40px 36px;
+    width: 100%; max-width: 420px; padding: 40px 36px;
     box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  }
+  @media (max-width: 480px) {
+    .login-card { padding: 28px 20px; border-radius: 14px; }
+    .login-logo { font-size: 20px; }
+    .login-title { font-size: 16px; }
   }
   .login-logo { font-size: 22px; font-weight: 800; margin-bottom: 6px; letter-spacing: -0.5px; }
   .login-logo span { color: var(--accent); }
@@ -3484,20 +3489,23 @@ export default function App() {
     </div>
   );
 
-  // Session expired overlay — shown on top of app so user sees the warning clearly
+  // Normal first-time login — full responsive page
+  if (!user && !sessionExpired) return (
+    <><style>{CSS}</style><LoginPage onLogin={handleLogin} /></>
+  );
+
+  // Session expired — full page login with warning banner on top
   if (sessionExpired || !user) return (
     <>
       <style>{CSS}</style>
-      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
-        <div style={{ background:"var(--surface)", borderRadius:16, padding:32, maxWidth:400, width:"100%", textAlign:"center", border:"1px solid #ef4444" }}>
-          <div style={{ fontSize:40, marginBottom:12 }}>🔒</div>
-          <div style={{ fontWeight:800, fontSize:18, color:"#ef4444", marginBottom:8 }}>Session Expired</div>
-          <div style={{ fontSize:14, color:"var(--text3)", marginBottom:24, lineHeight:1.6 }}>
-            Your login session has expired. Please sign in again to continue.<br/>
-            <span style={{ color:"var(--warning)", fontSize:12 }}>⚠ Any unsaved data from this session was not saved to the database.</span>
-          </div>
-          <LoginPage onLogin={handleLogin} />
+      <div style={{ minHeight:"100vh", background: "radial-gradient(ellipse at 30% 20%, rgba(59,130,246,0.12) 0%, transparent 60%), radial-gradient(ellipse at 80% 80%, rgba(139,92,246,0.08) 0%, transparent 50%), var(--bg)" }}>
+        {/* Warning banner */}
+        <div style={{ background:"#ef4444", color:"#fff", padding:"12px 20px", textAlign:"center", fontSize:13, fontWeight:600, display:"flex", alignItems:"center", justifyContent:"center", gap:10, flexWrap:"wrap" }}>
+          <span>🔒 Your session expired — please sign in again.</span>
+          <span style={{ fontSize:11, opacity:0.85 }}>⚠ Data entered while logged out was not saved.</span>
         </div>
+        {/* Full responsive login page below banner */}
+        <LoginPage onLogin={handleLogin} />
       </div>
     </>
   );
