@@ -666,11 +666,15 @@ function useToast() {
 // ============================================================
 // AUTH
 // ============================================================
-// Role mapping — email → role/name/initials
-const USER_ROLES = {
-  "hr@alithomv.com":   { role: "manager",    name: "HR Manager", initials: "HR" },
-  "info@alithomv.com": { role: "supervisor", name: "Supervisor", initials: "SV" },
-};
+// Role is stored in Supabase user metadata (user_metadata.role)
+// Fallback: if no role set, default to "supervisor"
+function getRoleInfo(sbUser) {
+  const meta = sbUser?.user_metadata || {};
+  const role = meta.role || "supervisor";
+  const name = meta.name || sbUser?.email?.split("@")[0] || "User";
+  const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  return { role, name, initials };
+}
 
 // Supabase Auth helpers
 async function sbSignIn(email, password) {
@@ -709,11 +713,12 @@ function LoginPage({ onLogin }) {
   const handleLogin = async () => {
     const trimmedEmail = email.toLowerCase().trim();
     if (!trimmedEmail || !password) { setError("Please enter your email and password."); return; }
-    if (!USER_ROLES[trimmedEmail]) { setError("Invalid email or password."); return; }
     setLoading(true); setError("");
     try {
       const data = await sbSignIn(trimmedEmail, password);
-      const roleInfo = USER_ROLES[trimmedEmail];
+      // Get role from user metadata
+      const sbUser = data.user || {};
+      const roleInfo = getRoleInfo(sbUser);
       onLogin({ email: trimmedEmail, token: data.access_token, ...roleInfo });
     } catch (e) {
       setError(e.message);
@@ -2980,9 +2985,11 @@ export default function App() {
           const session = JSON.parse(savedSession);
           const sbUser = await sbGetUser(session.token);
           if (sbUser) {
-            setUser(session); // token still valid
+            // Refresh role from latest metadata in case it changed
+            const roleInfo = getRoleInfo(sbUser);
+            setUser({ ...session, ...roleInfo });
           } else {
-            localStorage.removeItem("att:session"); // token expired
+            localStorage.removeItem("att:session");
           }
         } catch {
           localStorage.removeItem("att:session");
