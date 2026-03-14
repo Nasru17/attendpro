@@ -2480,46 +2480,55 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
   const [bulkSelected, setBulkSelected] = useState(new Set());
   const [showBulkBonus, setShowBulkBonus] = useState(false);
 
+  const [viewMode, setViewMode] = useState("actual"); // "actual" | "projected"
+
   const monthsClean = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const monthKey = `${year}-${String(month+1).padStart(2,"0")}`;
   const totalDays = getDaysInMonth(year, month);
+
+  // Is this the current month?
+  const isCurrentMonth = year === today.getFullYear() && month === today.getMonth();
+  // How many days to calculate up to:
+  // actual mode + current month → only up to today's date
+  // projected mode or past/future month → full month
+  const calcUpTo = (mode) => {
+    if (mode === "actual" && isCurrentMonth) return today.getDate();
+    return totalDays;
+  };
 
   // Global roster (no site) — all employees in this month's roster
   const globalRoster = rosters[monthKey] || {};
   const siteEmps = employees.filter(e => Object.keys(globalRoster).includes(e.id));
 
-  // Count how many days in this month an employee was on active status
-  // Active days = days from 1 up to (but not including) statusDate if non-active, else all days
-  const getActiveDays = (emp) => {
+  // Count active days up to a given day number
+  const getActiveDaysUpTo = (emp, upTo) => {
     const st = emp.empStatus || "active";
-    if (st === "active") return totalDays;
+    if (st === "active") return upTo;
     if (!emp.statusDate) return 0;
-    // statusDate like "2026-03-15" — active before that date
     const statusD = new Date(emp.statusDate + "T00:00:00");
     const monthStart = new Date(year, month, 1);
-    const monthEnd = new Date(year, month, totalDays);
-    if (statusD <= monthStart) return 0; // went inactive before or on month start
-    if (statusD > monthEnd) return totalDays; // went inactive after month end
-    return statusD.getDate() - 1; // days 1 to (statusDate day - 1)
+    const lastDay = new Date(year, month, upTo);
+    if (statusD <= monthStart) return 0;
+    if (statusD > lastDay) return upTo;
+    return statusD.getDate() - 1;
   };
 
-  const calcPayroll = (emp) => {
+  const calcPayroll = (emp, mode = viewMode) => {
     const empRoster = globalRoster[emp.id] || {};
-    const activeDays = getActiveDays(emp);
+    const upTo = calcUpTo(mode);
+    const activeDays = getActiveDaysUpTo(emp, upTo);
 
     let presentDays = 0, absentDays = 0, halfDays = 0, sickDays = 0, leaveDays = 0;
-    let holidayDays = 0, offDays = 0;
+    let holidayDays = 0, offDays = 0, enteredWorkDays = 0;
     let genOT = 0, concreteOT = 0, cementOT = 0, minutesLate = 0;
     let holidayOTBelow = 0, holidayOTFull = 0;
 
-    for (let d = 1; d <= totalDays; d++) {
+    for (let d = 1; d <= upTo; d++) {
       const dk = `${monthKey}-${String(d).padStart(2,"0")}`;
-      const dateStr = dk;
+      const activeOnDay = isEmpActiveOnDate(emp, dk);
+      if (!activeOnDay) continue;
 
-      // Check if employee was active on this day
-      const activeOnDay = isEmpActiveOnDate(emp, dateStr);
-
-      // Roster type for this day — read live from roster
+      // Roster type — live from roster
       const rType = empRoster[d] || (isFriday(year, month, d) ? "H" : "W");
 
       // OT record
@@ -2530,39 +2539,41 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
       }
 
       if (rType === "H") {
-        // Holiday — only count if employee was active
-        if (activeOnDay) {
-          holidayDays++;
-          if (otRec && (otRec.genOT || 0) > 0) {
-            const hrs = otRec.genOT || 0;
-            if (hrs >= 9.5) holidayOTFull++;
-            else holidayOTBelow += hrs;
-          }
+        // Holiday from roster — always counts (no attendance needed)
+        holidayDays++;
+        if (otRec && (otRec.genOT || 0) > 0) {
+          const hrs = otRec.genOT || 0;
+          if (hrs >= 9.5) holidayOTFull++;
+          else holidayOTBelow += hrs;
         }
       } else if (rType === "O") {
-        if (activeOnDay) offDays++;
+        // Off day from roster — counts as off, no pay
+        offDays++;
       } else {
-        // Work day — check attendance
+        // Work day — ONLY count if attendance was actually entered
         const dayData = attendance[dk] || {};
         let a = null;
         for (const sid of Object.keys(dayData)) {
           if (dayData[sid]?.[emp.id]) { a = dayData[sid][emp.id]; break; }
         }
-        if (activeOnDay) {
-          if (a) {
-            if (a.status === "P") presentDays++;
-            else if (a.status === "A") absentDays++;
-            else if (a.status === "H") halfDays++;
-            else if (a.status === "S") { sickDays++; absentDays++; } // sick = absent for pay
-            else if (a.status === "L") { leaveDays++; } // leave tracked separately — basic only
-            minutesLate += a.minutesLate || 0;
-          } else {
-            // No attendance entered → treat as present (default)
-            presentDays++;
-          }
+
+        if (a) {
+          // Attendance entered — count it
+          enteredWorkDays++;
+          if (a.status === "P") presentDays++;
+          else if (a.status === "A") absentDays++;
+          else if (a.status === "H") halfDays++;
+          else if (a.status === "S") { sickDays++; absentDays++; }
+          else if (a.status === "L") leaveDays++;
+          minutesLate += a.minutesLate || 0;
+        } else if (mode === "projected") {
+          // Projected mode — assume present for days not yet entered
+          presentDays++;
+          enteredWorkDays++;
         }
-        // Regular OT (non-holiday, active day)
-        if (otRec && activeOnDay) {
+        // actual mode + no attendance = skip day entirely (not counted)
+
+        if (otRec) {
           genOT += otRec.genOT || 0;
           concreteOT += otRec.concreteOT || 0;
           cementOT += otRec.cementOT || 0;
@@ -2574,34 +2585,35 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
     const attendanceAllow_ = Number(emp.attendanceAllowance) || 0;
     const foodAllow_       = Number(emp.foodAllowance) || 0;
     const phoneAllow_      = Number(phoneAllowances[emp.id] ?? emp.phoneAllowance) || 0;
+    const accommodationAllow_ = Number(emp.accommodationAllowance) || 0;
 
-    // Pro-rata daily rates based on total days in month
-    const dailyBasic       = basicSalary      / (totalDays || 1);
-    const dailyAttAllow    = attendanceAllow_  / (totalDays || 1);
-    const dailyFood        = foodAllow_        / (totalDays || 1);
-    const dailyPhone       = phoneAllow_       / (totalDays || 1);
+    // Daily rates — always based on total days in month
+    const dailyBasic    = basicSalary      / (totalDays || 1);
+    const dailyAttAllow = attendanceAllow_  / (totalDays || 1);
+    const dailyFood     = foodAllow_        / (totalDays || 1);
+    const dailyPhone    = phoneAllow_       / (totalDays || 1);
+    const dailyAccom    = accommodationAllow_ / (totalDays || 1);
 
-    // Work days = active days minus holidays, off days, and leave days
-    const workDays = activeDays - holidayDays - offDays - leaveDays;
+    // Days for allowance calculation — holidays + entered/projected work days - leave days
+    const paidWorkDays  = presentDays + halfDays + absentDays; // all non-leave entered work days
+    const paidAllowDays = holidayDays + presentDays; // days food/phone/accom paid (not leave, not absent, not off)
 
-    // Basic earned:
-    // - present/half/absent work days paid by daily rate (absent deducted, half at 50%)
-    // - leave days: basic only (daily rate × leaveDays) — no other allowances
-    // - holidays: daily basic × holidayDays
-    const basicForWork     = dailyBasic * (workDays - absentDays - halfDays * 0.5);
-    const basicForLeave    = dailyBasic * leaveDays; // basic paid on leave days
-    const basicForHoliday  = dailyBasic * holidayDays;
-    const basicEarned      = basicForWork + basicForLeave + basicForHoliday;
+    // Basic salary breakdown
+    const basicForWork    = dailyBasic * (presentDays + halfDays * 0.5); // present + half
+    const basicForLeave   = dailyBasic * leaveDays;                       // leave = basic only
+    const basicForHoliday = dailyBasic * holidayDays;                     // holidays
+    // absent days = no basic
+    const basicEarned     = basicForWork + basicForLeave + basicForHoliday;
 
-    // Attendance allowance: only present + holiday days (NOT leave days)
-    const attAllowEarned   = dailyAttAllow * (presentDays + holidayDays);
+    // Attendance allowance — only present + holiday days
+    const attAllowEarned  = dailyAttAllow * (presentDays + holidayDays);
 
-    // Holiday OT allowance
+    // Holiday OT
     const holidayAllowBelow = holidayOTBelow * 30;
     const holidayAllowFull  = holidayOTFull  * (attendanceAllow_ * 1.5);
     const holidayAllow      = holidayAllowBelow + holidayAllowFull;
 
-    // Late deduction: per minute from basic rate
+    // Late deduction
     const lateDeduct = minutesLate * (dailyBasic / (8 * 60));
 
     // OT
@@ -2609,24 +2621,20 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
     const concreteOTAmount = concreteOT * (Number(emp.concreteOT) || 200);
     const cementOTAmount   = cementOT   * (Number(emp.cementOT)   || 100);
 
-    // Food, phone, accommodation: pro-rata by active days MINUS leave days
-    // (leave days = basic only — no food/phone/accommodation)
-    const paidAllowDays = activeDays - leaveDays;
-    const foodAllow         = +(dailyFood  * paidAllowDays).toFixed(2);
-    const phoneAllow        = +(dailyPhone * paidAllowDays).toFixed(2);
-    const accommodationAllow_ = Number(emp.accommodationAllowance) || 0;
-    const dailyAccom        = accommodationAllow_ / (totalDays || 1);
+    // Food, phone, accommodation — paid for present + holiday days (not leave, absent, off)
+    const foodAllow        = +(dailyFood  * paidAllowDays).toFixed(2);
+    const phoneAllow       = +(dailyPhone * paidAllowDays).toFixed(2);
     const accommodationAllow = +(dailyAccom * paidAllowDays).toFixed(2);
 
-    // Tea: MVR 10 per present day only
+    // Tea — present days only
     const teaAllow = presentDays * 10;
 
-    // Bonus/extra allowance for this employee
-    const bonusRec   = bonuses[emp.id] || {};
+    // Bonus
+    const bonusRec    = bonuses[emp.id] || {};
     const bonusAmount = Number(bonusRec.amount) || 0;
     const bonusName   = bonusRec.name || "";
 
-    // Deductions — full month amounts, no pro-rata
+    // Deductions — full amounts always
     const ded = deductions[emp.id] || {};
     const utilityDeduct = Number(ded.utility) || 0;
     const advanceDeduct = Number(ded.advance) || 0;
@@ -2638,7 +2646,7 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
 
     return {
       presentDays, absentDays, halfDays, sickDays, leaveDays, holidayDays, offDays,
-      activeDays, workDays, paidAllowDays,
+      enteredWorkDays, activeDays, paidAllowDays, upTo,
       genOT, concreteOT, cementOT, minutesLate,
       holidayOTBelow, holidayOTFull, holidayAllowBelow, holidayAllowFull,
       basicEarned, basicForWork, basicForLeave, basicForHoliday,
@@ -2686,6 +2694,17 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
                 <option value="">All Sites</option>
                 {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
+            </div>
+            <div className="form-group" style={{ justifyContent: "flex-end" }}>
+              <label className="form-label">&nbsp;</label>
+              <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
+                <button onClick={() => setViewMode("actual")} style={{ padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", border: "none", fontFamily: "var(--font)", background: viewMode === "actual" ? "#3b82f6" : "var(--surface2)", color: viewMode === "actual" ? "#fff" : "var(--text3)", transition: "all 0.15s" }}>
+                  📋 Actual {isCurrentMonth && viewMode === "actual" ? `(1–${today.getDate()})` : ""}
+                </button>
+                <button onClick={() => setViewMode("projected")} style={{ padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", border: "none", borderLeft: "1px solid var(--border)", fontFamily: "var(--font)", background: viewMode === "projected" ? "#8b5cf6" : "var(--surface2)", color: viewMode === "projected" ? "#fff" : "var(--text3)", transition: "all 0.15s" }}>
+                  🔮 Full Month
+                </button>
+              </div>
             </div>
             <div className="form-group" style={{ justifyContent: "flex-end" }}>
               <label className="form-label">&nbsp;</label>
@@ -2750,7 +2769,16 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
 
       <div className="card mb-4">
         <div className="card-header">
-          <div className="card-title">Payroll Summary — {monthsClean[month]} {year}</div>
+          <div>
+            <div className="card-title">Payroll Summary — {monthsClean[month]} {year}</div>
+            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>
+              {viewMode === "actual"
+                ? isCurrentMonth
+                  ? `📋 Actual — showing salary based on attendance entered so far (1–${today.getDate()} ${monthsClean[month]})`
+                  : `📋 Actual — based on attendance entered for ${monthsClean[month]} ${year}`
+                : `🔮 Full Month Projection — assumes present for all remaining days`}
+            </div>
+          </div>
           <button className="btn btn-success btn-sm" onClick={() => downloadPayrollExcel({ employees: siteEmps, months: monthsClean, month, year, calcPayroll })}>
             ⬇ Download Excel
           </button>
@@ -2801,7 +2829,10 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
                   <div className="payslip-header">
                     <div style={{ fontWeight: 700, fontSize: 16 }}>{selected.name}</div>
                     <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>{selected.empId} | {selected.designation || "—"}</div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>{monthsClean[month]} {year} · Active {p.activeDays} of {totalDays} days</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
+                      {monthsClean[month]} {year} · {viewMode === "actual" ? `Actual (1–${p.upTo})` : "Full Month Projection"}
+                      {" · "}Active {p.activeDays} days
+                    </div>
                     <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
                       {[["Present",p.presentDays,"#10b981"],["Absent",p.absentDays,"#ef4444"],["Half Day",p.halfDays,"#f59e0b"],["Sick",p.sickDays,"#8b5cf6"],["Leave",p.leaveDays,"#94a3b8"],["Holiday",p.holidayDays,"#06b6d4"],["Off",p.offDays,"#64748b"]].map(([l,v,c]) => v > 0 ? (
                         <div key={l} style={{ textAlign: "center" }}>
