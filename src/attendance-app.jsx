@@ -2473,118 +2473,194 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
   const [selected, setSelected] = useState(null);
   const [phoneAllowances, setPhoneAllowances] = useState({});
 
-  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  // Bonus/extra allowance — { [empId]: { name, amount } }
+  const [bonuses, setBonuses] = useState({});
+  // Bulk bonus UI
+  const [bulkBonus, setBulkBonus] = useState({ name: "", amount: "" });
+  const [bulkSelected, setBulkSelected] = useState(new Set());
+  const [showBulkBonus, setShowBulkBonus] = useState(false);
+
+  const monthsClean = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const monthKey = `${year}-${String(month+1).padStart(2,"0")}`;
-  const days = getDaysInMonth(year, month);
+  const totalDays = getDaysInMonth(year, month);
 
   // Global roster (no site) — all employees in this month's roster
   const globalRoster = rosters[monthKey] || {};
   const siteEmps = employees.filter(e => Object.keys(globalRoster).includes(e.id));
 
+  // Count how many days in this month an employee was on active status
+  // Active days = days from 1 up to (but not including) statusDate if non-active, else all days
+  const getActiveDays = (emp) => {
+    const st = emp.empStatus || "active";
+    if (st === "active") return totalDays;
+    if (!emp.statusDate) return 0;
+    // statusDate like "2026-03-15" — active before that date
+    const statusD = new Date(emp.statusDate + "T00:00:00");
+    const monthStart = new Date(year, month, 1);
+    const monthEnd = new Date(year, month, totalDays);
+    if (statusD <= monthStart) return 0; // went inactive before or on month start
+    if (statusD > monthEnd) return totalDays; // went inactive after month end
+    return statusD.getDate() - 1; // days 1 to (statusDate day - 1)
+  };
+
   const calcPayroll = (emp) => {
     const empRoster = globalRoster[emp.id] || {};
+    const activeDays = getActiveDays(emp);
 
     let presentDays = 0, absentDays = 0, halfDays = 0, sickDays = 0, leaveDays = 0;
-    let holidayDays = 0, genOT = 0, concreteOT = 0, cementOT = 0, minutesLate = 0;
+    let holidayDays = 0, offDays = 0;
+    let genOT = 0, concreteOT = 0, cementOT = 0, minutesLate = 0;
+    let holidayOTBelow = 0, holidayOTFull = 0;
 
-    // Holiday OT tracking — per holiday day to apply correct rate
-    let holidayOTBelow = 0;   // total hrs on holidays where genOT < 9.5 hrs (MVR 30/hr)
-    let holidayOTFull = 0;    // count of holidays where genOT >= 9.5 hrs (1.5× attendance allow each)
-
-    for (let d = 1; d <= days; d++) {
+    for (let d = 1; d <= totalDays; d++) {
       const dk = `${monthKey}-${String(d).padStart(2,"0")}`;
-      const dayData = attendance[dk] || {};
-      let a = null;
-      for (const sid of Object.keys(dayData)) {
-        if (dayData[sid]?.[emp.id]) { a = dayData[sid][emp.id]; break; }
-      }
+      const dateStr = dk;
+
+      // Check if employee was active on this day
+      const activeOnDay = isEmpActiveOnDate(emp, dateStr);
+
+      // Roster type for this day — read live from roster
+      const rType = empRoster[d] || (isFriday(year, month, d) ? "H" : "W");
+
+      // OT record
       const otDayData = (ot || {})[dk] || {};
       let otRec = null;
       for (const sid of Object.keys(otDayData)) {
         if (otDayData[sid]?.[emp.id]) { otRec = otDayData[sid][emp.id]; break; }
       }
-      const rType = empRoster[d] || (isFriday(year, month, d) ? "H" : "W");
 
       if (rType === "H") {
-        holidayDays++;
-        // Holiday allowance only if OT was done on this holiday
-        if (otRec && (otRec.genOT || 0) > 0) {
-          const hrs = otRec.genOT || 0;
-          if (hrs >= 9.5) {
-            holidayOTFull++;      // earns 1.5× attendance allowance
-          } else {
-            holidayOTBelow += hrs; // earns MVR 30/hr
+        // Holiday — only count if employee was active
+        if (activeOnDay) {
+          holidayDays++;
+          if (otRec && (otRec.genOT || 0) > 0) {
+            const hrs = otRec.genOT || 0;
+            if (hrs >= 9.5) holidayOTFull++;
+            else holidayOTBelow += hrs;
           }
         }
-      } else if (a) {
-        if (a.status === "P") presentDays++;
-        else if (a.status === "A") absentDays++;
-        else if (a.status === "H") halfDays++;
-        else if (a.status === "S") sickDays++;
-        else if (a.status === "L") leaveDays++;
-        minutesLate += a.minutesLate || 0;
-      } else if (rType === "W") {
-        presentDays++;
-      }
-      // Regular OT (non-holiday days only — holiday OT handled separately above)
-      if (otRec && rType !== "H") {
-        genOT += otRec.genOT || 0;
-        concreteOT += otRec.concreteOT || 0;
-        cementOT += otRec.cementOT || 0;
+      } else if (rType === "O") {
+        if (activeOnDay) offDays++;
+      } else {
+        // Work day — check attendance
+        const dayData = attendance[dk] || {};
+        let a = null;
+        for (const sid of Object.keys(dayData)) {
+          if (dayData[sid]?.[emp.id]) { a = dayData[sid][emp.id]; break; }
+        }
+        if (activeOnDay) {
+          if (a) {
+            if (a.status === "P") presentDays++;
+            else if (a.status === "A") absentDays++;
+            else if (a.status === "H") halfDays++;
+            else if (a.status === "S") { sickDays++; absentDays++; } // sick = absent for pay
+            else if (a.status === "L") { leaveDays++; } // leave tracked separately — basic only
+            minutesLate += a.minutesLate || 0;
+          } else {
+            // No attendance entered → treat as present (default)
+            presentDays++;
+          }
+        }
+        // Regular OT (non-holiday, active day)
+        if (otRec && activeOnDay) {
+          genOT += otRec.genOT || 0;
+          concreteOT += otRec.concreteOT || 0;
+          cementOT += otRec.cementOT || 0;
+        }
       }
     }
 
-    const workDays = days - holidayDays;
-    const basicSalary = Number(emp.basicSalary) || 0;
-    const attendanceAllowance = Number(emp.attendanceAllowance) || 0;
+    const basicSalary      = Number(emp.basicSalary) || 0;
+    const attendanceAllow_ = Number(emp.attendanceAllowance) || 0;
+    const foodAllow_       = Number(emp.foodAllowance) || 0;
+    const phoneAllow_      = Number(phoneAllowances[emp.id] ?? emp.phoneAllowance) || 0;
 
-    const dailyBasic = basicSalary / (workDays || 1);
-    const absentDeduct = absentDays * dailyBasic;
-    const halfDeduct = halfDays * (dailyBasic / 2);
-    const basicEarned = basicSalary - absentDeduct - halfDeduct;
+    // Pro-rata daily rates based on total days in month
+    const dailyBasic       = basicSalary      / (totalDays || 1);
+    const dailyAttAllow    = attendanceAllow_  / (totalDays || 1);
+    const dailyFood        = foodAllow_        / (totalDays || 1);
+    const dailyPhone       = phoneAllow_       / (totalDays || 1);
 
-    // Attendance allowance: only if worked at least one regular day
-    const attendanceAllow = presentDays > 0 ? attendanceAllowance : 0;
+    // Work days = active days minus holidays, off days, and leave days
+    const workDays = activeDays - holidayDays - offDays - leaveDays;
 
-    // Holiday allowance: only earned when OT was done on that holiday
-    // < 9.5 hrs → MVR 30/hr  |  ≥ 9.5 hrs → attendance allowance × 1.5
+    // Basic earned:
+    // - present/half/absent work days paid by daily rate (absent deducted, half at 50%)
+    // - leave days: basic only (daily rate × leaveDays) — no other allowances
+    // - holidays: daily basic × holidayDays
+    const basicForWork     = dailyBasic * (workDays - absentDays - halfDays * 0.5);
+    const basicForLeave    = dailyBasic * leaveDays; // basic paid on leave days
+    const basicForHoliday  = dailyBasic * holidayDays;
+    const basicEarned      = basicForWork + basicForLeave + basicForHoliday;
+
+    // Attendance allowance: only present + holiday days (NOT leave days)
+    const attAllowEarned   = dailyAttAllow * (presentDays + holidayDays);
+
+    // Holiday OT allowance
     const holidayAllowBelow = holidayOTBelow * 30;
-    const holidayAllowFull  = holidayOTFull  * (attendanceAllowance * 1.5);
-    const holidayAllow = holidayAllowBelow + holidayAllowFull;
+    const holidayAllowFull  = holidayOTFull  * (attendanceAllow_ * 1.5);
+    const holidayAllow      = holidayAllowBelow + holidayAllowFull;
 
-    const lateDeduct = minutesLate * (basicSalary / ((workDays || 1) * 8 * 60));
+    // Late deduction: per minute from basic rate
+    const lateDeduct = minutesLate * (dailyBasic / (8 * 60));
 
-    // Regular OT (non-holiday)
+    // OT
     const genOTAmount      = genOT      * (Number(emp.otRate)     || 20);
     const concreteOTAmount = concreteOT * (Number(emp.concreteOT) || 200);
     const cementOTAmount   = cementOT   * (Number(emp.cementOT)   || 100);
 
-    // Allowances — all flat monthly amounts except tea (per-day)
-    const foodAllow  = Number(emp.foodAllowance) || 0;
-    const teaAllow   = presentDays * 10;
-    const phoneAllow = Number(phoneAllowances[emp.id] ?? emp.phoneAllowance) || 0;
-    const accommodationAllow = Number(emp.accommodationAllowance) || 0;
+    // Food, phone, accommodation: pro-rata by active days MINUS leave days
+    // (leave days = basic only — no food/phone/accommodation)
+    const paidAllowDays = activeDays - leaveDays;
+    const foodAllow         = +(dailyFood  * paidAllowDays).toFixed(2);
+    const phoneAllow        = +(dailyPhone * paidAllowDays).toFixed(2);
+    const accommodationAllow_ = Number(emp.accommodationAllowance) || 0;
+    const dailyAccom        = accommodationAllow_ / (totalDays || 1);
+    const accommodationAllow = +(dailyAccom * paidAllowDays).toFixed(2);
 
-    // Deductions
+    // Tea: MVR 10 per present day only
+    const teaAllow = presentDays * 10;
+
+    // Bonus/extra allowance for this employee
+    const bonusRec   = bonuses[emp.id] || {};
+    const bonusAmount = Number(bonusRec.amount) || 0;
+    const bonusName   = bonusRec.name || "";
+
+    // Deductions — full month amounts, no pro-rata
     const ded = deductions[emp.id] || {};
     const utilityDeduct = Number(ded.utility) || 0;
     const advanceDeduct = Number(ded.advance) || 0;
     const loanDeduct    = Number(ded.loanInstallment) || 0;
 
-    const grossEarnings = basicEarned + holidayAllow + attendanceAllow + genOTAmount + concreteOTAmount + cementOTAmount + foodAllow + teaAllow + phoneAllow + accommodationAllow;
+    const grossEarnings   = basicEarned + attAllowEarned + holidayAllow + genOTAmount + concreteOTAmount + cementOTAmount + foodAllow + teaAllow + phoneAllow + accommodationAllow + bonusAmount;
     const totalDeductions = lateDeduct + utilityDeduct + advanceDeduct + loanDeduct;
-    const netPay = grossEarnings - totalDeductions;
+    const netPay          = grossEarnings - totalDeductions;
 
     return {
-      presentDays, absentDays, halfDays, sickDays, leaveDays, holidayDays,
+      presentDays, absentDays, halfDays, sickDays, leaveDays, holidayDays, offDays,
+      activeDays, workDays, paidAllowDays,
       genOT, concreteOT, cementOT, minutesLate,
       holidayOTBelow, holidayOTFull, holidayAllowBelow, holidayAllowFull,
-      basicEarned, attendanceAllow, holidayAllow,
+      basicEarned, basicForWork, basicForLeave, basicForHoliday,
+      attendanceAllow: attAllowEarned, holidayAllow,
       genOTAmount, concreteOTAmount, cementOTAmount,
       foodAllow, teaAllow, phoneAllow, accommodationAllow,
+      bonusAmount, bonusName,
       lateDeduct, utilityDeduct, advanceDeduct, loanDeduct,
-      grossEarnings, totalDeductions, netPay
+      grossEarnings, totalDeductions, netPay,
+      dailyBasic, dailyFood, dailyPhone, dailyAttAllow, dailyAccom
     };
+  };
+
+  const applyBulkBonus = () => {
+    if (!bulkBonus.name || !bulkBonus.amount) return toast("Enter bonus name and amount", "error");
+    const next = { ...bonuses };
+    bulkSelected.forEach(id => { next[id] = { name: bulkBonus.name, amount: +bulkBonus.amount }; });
+    setBonuses(next);
+    setShowBulkBonus(false);
+    setBulkBonus({ name: "", amount: "" });
+    setBulkSelected(new Set());
+    toast(`Bonus applied to ${bulkSelected.size} employees`, "success");
   };
 
   return (
@@ -2595,7 +2671,7 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
             <div className="form-group">
               <label className="form-label">Month</label>
               <select className="form-select" value={month} onChange={e => setMonth(+e.target.value)}>
-                {months.map((m,i) => <option key={i} value={i}>{m}</option>)}
+                {monthsClean.map((m,i) => <option key={i} value={i}>{m}</option>)}
               </select>
             </div>
             <div className="form-group">
@@ -2611,36 +2687,95 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
                 {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
+            <div className="form-group" style={{ justifyContent: "flex-end" }}>
+              <label className="form-label">&nbsp;</label>
+              <button className="btn btn-warning btn-sm" style={{ color: "#000" }} onClick={() => setShowBulkBonus(true)}>🎁 Add Bonus / Allowance</button>
+            </div>
           </div>
         </div>
       </div>
 
+      {/* Bulk Bonus Modal */}
+      {showBulkBonus && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 500 }}>
+            <div className="modal-header">
+              <div className="modal-title">🎁 Add Bonus / Extra Allowance</div>
+              <button className="modal-close" onClick={() => setShowBulkBonus(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-grid form-grid-2" style={{ marginBottom: 16 }}>
+                <div className="form-group">
+                  <label className="form-label">Allowance Name</label>
+                  <input className="form-input" value={bulkBonus.name} onChange={e => setBulkBonus(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Ramadan Allowance, Bonus" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Amount (MVR)</label>
+                  <input className="form-input" type="number" value={bulkBonus.amount} onChange={e => setBulkBonus(p => ({ ...p, amount: e.target.value }))} placeholder="0" />
+                </div>
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
+                Select Employees ({bulkSelected.size} selected)
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setBulkSelected(new Set(siteEmps.map(e => e.id)))}>Select All</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setBulkSelected(new Set())}>Clear</button>
+              </div>
+              <div style={{ maxHeight: 300, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+                {siteEmps.map(e => {
+                  const isSelected = bulkSelected.has(e.id);
+                  const existingBonus = bonuses[e.id];
+                  return (
+                    <label key={e.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: "1px solid var(--border)", cursor: "pointer", background: isSelected ? "rgba(245,158,11,0.07)" : "transparent" }}>
+                      <input type="checkbox" checked={isSelected} onChange={() => setBulkSelected(p => { const n = new Set(p); n.has(e.id) ? n.delete(e.id) : n.add(e.id); return n; })} style={{ width: 16, height: 16, accentColor: "#f59e0b" }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{e.name}</div>
+                        <div style={{ fontSize: 11, color: "var(--text3)" }}>{e.empId}</div>
+                      </div>
+                      {existingBonus && <span className="badge badge-yellow" style={{ fontSize: 9 }}>{existingBonus.name}: MVR {existingBonus.amount}</span>}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setShowBulkBonus(false)}>Cancel</button>
+              <button className="btn btn-warning" style={{ color: "#000" }} disabled={bulkSelected.size === 0} onClick={applyBulkBonus}>
+                Apply to {bulkSelected.size} Employee{bulkSelected.size !== 1 ? "s" : ""}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card mb-4">
         <div className="card-header">
-          <div className="card-title">Payroll Summary — {months[month]} {year}</div>
-          <button className="btn btn-success btn-sm" onClick={() => downloadPayrollExcel({ employees: siteEmps, months, month, year, calcPayroll })}>
+          <div className="card-title">Payroll Summary — {monthsClean[month]} {year}</div>
+          <button className="btn btn-success btn-sm" onClick={() => downloadPayrollExcel({ employees: siteEmps, months: monthsClean, month, year, calcPayroll })}>
             ⬇ Download Excel
           </button>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Employee</th><th>ID</th><th>Present</th><th>Absent</th><th>Basic Earned</th><th>OT Total</th><th>Allowances</th><th>Deductions</th><th>Net Pay</th><th></th></tr>
+              <tr><th>Employee</th><th>ID</th><th>Active Days</th><th>Present</th><th>Absent</th><th>Basic Earned</th><th>OT Total</th><th>Allowances</th><th>Bonus</th><th>Deductions</th><th>Net Pay</th><th></th></tr>
             </thead>
             <tbody>
               {siteEmps.length === 0 ? (
-                <tr><td colSpan={10}><div className="empty-state"><p>No employees{siteId ? " in this site's roster" : ""}</p></div></td></tr>
+                <tr><td colSpan={12}><div className="empty-state"><p>No employees in roster for {monthsClean[month]} {year}</p></div></td></tr>
               ) : siteEmps.map(e => {
                 const p = calcPayroll(e);
                 return (
                   <tr key={e.id}>
                     <td style={{ fontWeight: 600 }}>{e.name}</td>
                     <td className="text-mono" style={{ color: "var(--accent)" }}>{e.empId}</td>
+                    <td><span className="badge badge-blue">{p.activeDays}/{totalDays}</span></td>
                     <td><span className="badge badge-green">{p.presentDays}</span></td>
                     <td><span className="badge badge-red">{p.absentDays}</span></td>
                     <td className="text-mono">{mvr(p.basicEarned)}</td>
                     <td className="text-mono">{mvr(p.genOTAmount + p.concreteOTAmount + p.cementOTAmount)}</td>
                     <td className="text-mono">{mvr(p.attendanceAllow + p.foodAllow + p.teaAllow + p.phoneAllow + p.accommodationAllow)}</td>
+                    <td className="text-mono">{p.bonusAmount > 0 ? <span className="badge badge-yellow">{mvr(p.bonusAmount)}</span> : "—"}</td>
                     <td className="text-mono" style={{ color: "var(--danger)" }}>{mvr(p.totalDeductions)}</td>
                     <td className="text-mono" style={{ color: "var(--success)", fontWeight: 700 }}>{mvr(p.netPay)}</td>
                     <td><button className="btn btn-primary btn-sm" onClick={() => setSelected(e)}>Slip</button></td>
@@ -2656,9 +2791,9 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
         const p = calcPayroll(selected);
         return (
           <div className="modal-overlay">
-            <div className="modal" style={{ maxWidth: 560 }}>
+            <div className="modal" style={{ maxWidth: 580 }}>
               <div className="modal-header">
-                <div className="modal-title">Pay Slip — {months[month]} {year}</div>
+                <div className="modal-title">Pay Slip — {monthsClean[month]} {year}</div>
                 <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
               </div>
               <div className="modal-body" style={{ padding: 0 }}>
@@ -2666,31 +2801,34 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
                   <div className="payslip-header">
                     <div style={{ fontWeight: 700, fontSize: 16 }}>{selected.name}</div>
                     <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>{selected.empId} | {selected.designation || "—"}</div>
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>{months[month]} {year}</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>{monthsClean[month]} {year} · Active {p.activeDays} of {totalDays} days</div>
                     <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
-                      {[["Present",p.presentDays,"#10b981"],["Absent",p.absentDays,"#ef4444"],["Half Day",p.halfDays,"#f59e0b"],["Sick",p.sickDays,"#8b5cf6"],["Leave",p.leaveDays,"#94a3b8"],["Holiday",p.holidayDays,"#06b6d4"]].map(([l,v,c]) => (
+                      {[["Present",p.presentDays,"#10b981"],["Absent",p.absentDays,"#ef4444"],["Half Day",p.halfDays,"#f59e0b"],["Sick",p.sickDays,"#8b5cf6"],["Leave",p.leaveDays,"#94a3b8"],["Holiday",p.holidayDays,"#06b6d4"],["Off",p.offDays,"#64748b"]].map(([l,v,c]) => v > 0 ? (
                         <div key={l} style={{ textAlign: "center" }}>
                           <div style={{ fontSize: 18, fontWeight: 700, color: c, fontFamily: "var(--mono)" }}>{v}</div>
                           <div style={{ fontSize: 9, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 }}>{l}</div>
                         </div>
-                      ))}
+                      ) : null)}
                     </div>
                   </div>
 
                   <div style={{ padding: "12px 0" }}>
                     <div style={{ padding: "4px 20px 8px", fontSize: 10, fontWeight: 700, color: "#06b6d4", letterSpacing: 1, textTransform: "uppercase" }}>Earnings</div>
                     {[
-                      ["Basic Salary", p.basicEarned],
-                      ["Attendance Allowance", p.attendanceAllow],
+                      ["Basic Salary (Work Days)", p.basicForWork, `${p.workDays - p.absentDays} days × ${mvr(p.dailyBasic)}/day`],
+                      ["Basic Salary (Leave Days)", p.basicForLeave, `${p.leaveDays} leave days × ${mvr(p.dailyBasic)}/day`],
+                      ["Basic Salary (Holidays)", p.basicForHoliday, `${p.holidayDays} days × ${mvr(p.dailyBasic)}/day`],
+                      ["Attendance Allowance", p.attendanceAllow, `${p.presentDays + p.holidayDays} days × ${mvr(p.dailyAttAllow)}/day`],
                       ...(p.holidayAllowBelow > 0 ? [["Holiday OT (< 9.5 hrs)", p.holidayAllowBelow, `${p.holidayOTBelow.toFixed(1)} hrs × MVR30`]] : []),
-                      ...(p.holidayAllowFull  > 0 ? [["Holiday OT (≥ 9.5 hrs)", p.holidayAllowFull,  `${p.holidayOTFull} day(s) × 1.5× attendance allow`]] : []),
+                      ...(p.holidayAllowFull  > 0 ? [["Holiday OT (≥ 9.5 hrs)", p.holidayAllowFull,  `${p.holidayOTFull} day(s) × 1.5× attendance`]] : []),
                       ["General OT", p.genOTAmount, `${p.genOT} hrs`],
                       ["Concrete OT", p.concreteOTAmount, `${p.concreteOT} units`],
                       ["Cement OT", p.cementOTAmount, `${p.cementOT} units`],
-                      ["Accommodation Allowance", p.accommodationAllow],
-                      ["Food Allowance", p.foodAllow],
+                      ["Accommodation Allowance", p.accommodationAllow, `${p.paidAllowDays} days × ${mvr(p.dailyAccom)}/day`],
+                      ["Food Allowance", p.foodAllow, `${p.paidAllowDays} days × ${mvr(p.dailyFood)}/day`],
                       ["Tea Allowance", p.teaAllow, `${p.presentDays} days × MVR10`],
-                      ["Phone Allowance", p.phoneAllow],
+                      ["Phone Allowance", p.phoneAllow, `${p.paidAllowDays} days × ${mvr(p.dailyPhone)}/day`],
+                      ...(p.bonusAmount > 0 ? [[p.bonusName || "Bonus", p.bonusAmount]] : []),
                     ].filter(r => r[1] > 0).map(([l, v, note]) => (
                       <div key={l} className="payslip-row">
                         <div>{l}{note ? <span style={{ fontSize: 10, color: "var(--text3)", marginLeft: 6 }}>({note})</span> : ""}</div>
@@ -2705,7 +2843,7 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
 
                     <div style={{ padding: "4px 20px 8px", fontSize: 10, fontWeight: 700, color: "#ef4444", letterSpacing: 1, textTransform: "uppercase", marginTop: 8 }}>Deductions</div>
                     {[
-                      ["Minute Late Deduction", p.lateDeduct, `${p.minutesLate} mins`],
+                      ["Late Deduction", p.lateDeduct, `${p.minutesLate} mins`],
                       ["Utility", p.utilityDeduct],
                       ["Advance", p.advanceDeduct],
                       ["Loan Installment", p.loanDeduct],
@@ -2721,11 +2859,26 @@ function PayrollPage({ employees, sites, attendance, ot, rosters, deductions, to
                       <div className="amount" style={{ color: "var(--success)", fontSize: 18 }}>{mvr(p.netPay)}</div>
                     </div>
 
-                    <div style={{ padding: "12px 20px" }}>
-                      <div className="form-group">
-                        <label className="form-label">Phone Allowance (Manual Override)</label>
-                        <input className="form-input" type="number" value={phoneAllowances[selected.id] ?? (selected.phoneAllowance || 0)}
-                          onChange={e => setPhoneAllowances(prev => ({ ...prev, [selected.id]: +e.target.value }))} />
+                    {/* Per-employee overrides */}
+                    <div style={{ padding: "14px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Manual Overrides</div>
+                      <div className="form-grid form-grid-2">
+                        <div className="form-group">
+                          <label className="form-label">Phone Allowance (MVR)</label>
+                          <input className="form-input" type="number" value={phoneAllowances[selected.id] ?? (selected.phoneAllowance || 0)}
+                            onChange={e => setPhoneAllowances(prev => ({ ...prev, [selected.id]: +e.target.value }))} />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">{bonuses[selected.id]?.name || "Bonus"} Name</label>
+                          <input className="form-input" value={bonuses[selected.id]?.name || ""}
+                            onChange={e => setBonuses(p => ({ ...p, [selected.id]: { ...p[selected.id], name: e.target.value } }))}
+                            placeholder="e.g. Ramadan Allowance" />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Bonus Amount (MVR)</label>
+                          <input className="form-input" type="number" value={bonuses[selected.id]?.amount || 0}
+                            onChange={e => setBonuses(p => ({ ...p, [selected.id]: { ...p[selected.id], amount: +e.target.value } }))} />
+                        </div>
                       </div>
                     </div>
                   </div>
