@@ -13,11 +13,18 @@ import TimesheetPage     from "./pages/TimesheetPage";
 import DeductionsPage    from "./pages/DeductionsPage";
 import PayrollPage       from "./pages/PayrollPage";
 import StatisticsPage    from "./pages/StatisticsPage";
-import RecruitmentPage   from "./pages/RecruitmentPage";
-import LeaveManagementPage from "./pages/LeaveManagementPage";
+import RecruitmentPage     from "./pages/RecruitmentPage";
+import RecruitmentDashboard from "./pages/RecruitmentDashboard";
+import QuotaPage            from "./pages/QuotaPage";
+import RequirementsPage     from "./pages/RequirementsPage";
+import LeaveManagementPage  from "./pages/LeaveManagementPage";
+import LeaveDashboard      from "./pages/LeaveDashboard";
+import LeaveTimetablePage  from "./pages/LeaveTimetablePage";
+import LeaveRequestsPage   from "./pages/LeaveRequestsPage";
 import PettyCashPage     from "./pages/PettyCashPage";
 import PermitTrackingPage from "./pages/PermitTrackingPage";
-import CompaniesPage      from "./pages/CompaniesPage";
+import CompaniesPage        from "./pages/CompaniesPage";
+import AttendanceDashboard  from "./pages/AttendanceDashboard";
 
 // ── Module definitions ────────────────────────────────────────
 // Each module has: id, icon, label, color, desc, comingSoon, roles, pages[]
@@ -27,11 +34,14 @@ export const MODULE_DEFS = [
     id: "recruitment",
     icon: "👔", label: "Recruitment",
     color: "#3b82f6",
-    desc: "Job postings, applications, and onboarding",
-    comingSoon: true,
+    desc: "Quota management, job requirements, and candidate tracking",
+    comingSoon: false,
     roles: ["manager"],
     pages: [
-      { id: "recruitment", icon: "👔", label: "Recruitment", roles: ["manager"] },
+      { id: "rec-dashboard",  icon: "📊", label: "Dashboard",    roles: ["manager"] },
+      { id: "quota",          icon: "🎯", label: "Quota",        roles: ["manager"] },
+      { id: "requirements",   icon: "📋", label: "Requirements", roles: ["manager"] },
+      { id: "recruitment",    icon: "👤", label: "Recruitment",  roles: ["manager"] },
     ],
   },
   {
@@ -55,10 +65,11 @@ export const MODULE_DEFS = [
     comingSoon: false,
     roles: ["manager", "supervisor"],
     pages: [
-      { id: "roster",     icon: "📋", label: "Duty Roster", roles: ["manager", "supervisor"] },
-      { id: "attendance", icon: "✓",  label: "Attendance",  roles: ["manager", "supervisor"] },
-      { id: "otentry",    icon: "⏱", label: "OT Entry",    roles: ["manager", "supervisor"] },
-      { id: "timesheet",  icon: "📊", label: "Timesheet",   roles: ["manager", "supervisor"] },
+      { id: "att-dashboard", icon: "📅", label: "Dashboard",   roles: ["manager", "supervisor"] },
+      { id: "attendance",    icon: "✓",  label: "Attendance",  roles: ["manager", "supervisor"] },
+      { id: "otentry",       icon: "⏱", label: "OT Entry",    roles: ["manager", "supervisor"] },
+      { id: "roster",        icon: "📋", label: "Duty Roster", roles: ["manager", "supervisor"] },
+      { id: "timesheet",     icon: "📊", label: "Timesheet",   roles: ["manager"] },
     ],
   },
   {
@@ -77,11 +88,14 @@ export const MODULE_DEFS = [
     id: "leave",
     icon: "🏖", label: "Leave Management",
     color: "#06b6d4",
-    desc: "Leave requests, balances, and approvals",
-    comingSoon: true,
+    desc: "Leave requests, timetable, and approvals",
+    comingSoon: false,
     roles: ["manager", "supervisor"],
     pages: [
-      { id: "leave", icon: "🏖", label: "Leave", roles: ["manager", "supervisor"] },
+      { id: "leave-dashboard",  icon: "📊", label: "Dashboard",  roles: ["manager", "supervisor"] },
+      { id: "leave-management", icon: "🏖", label: "Leave",      roles: ["manager", "supervisor"] },
+      { id: "leave-timetable",  icon: "📅", label: "Timetable",  roles: ["manager", "supervisor"] },
+      { id: "leave-requests",   icon: "📋", label: "Requests",   roles: ["manager"] },
     ],
   },
   {
@@ -130,6 +144,11 @@ export default function App() {
   const [rosters, setRosters]         = useState({});
   const [deductions, setDeductions]   = useState({});
   const [companies, setCompanies]     = useState([]);
+  const [quotas, setQuotas]           = useState([]);
+  const [requirements, setRequirements] = useState([]);
+  const [applicants, setApplicants]   = useState([]);
+  const [leaves, setLeaves]                 = useState([]);
+  const [leaveTimetable, setLeaveTimetable] = useState([]);
   const [loaded, setLoaded]           = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const { toasts, toast } = useToast();
@@ -166,10 +185,11 @@ export default function App() {
           localStorage.removeItem("att:session");
         }
       }
-      const [e, s, a, r, d, o, co] = await Promise.all([
+      const [e, s, a, r, d, o, co, qu, rq, ap, lv, lt] = await Promise.all([
         load(KEYS.employees), load(KEYS.sites),    load(KEYS.attendance),
         load(KEYS.rosters),   load(KEYS.deductions), load(KEYS.ot),
-        load(KEYS.companies),
+        load(KEYS.companies), load(KEYS.quotas),   load(KEYS.requirements),
+        load(KEYS.applicants), load(KEYS.leaves),  load(KEYS.leaveTimetable),
       ]);
       if (e)  setEmployees(e);
       if (s)  setSites(s);
@@ -178,6 +198,11 @@ export default function App() {
       if (d)  setDeductions(d);
       if (o)  setOt(o);
       if (co) setCompanies(co);
+      if (qu) setQuotas(qu);
+      if (rq) setRequirements(rq);
+      if (ap) setApplicants(ap);
+      if (lv) setLeaves(lv);
+      if (lt) setLeaveTimetable(lt);
       setLoaded(true);
     })();
   }, []);
@@ -205,7 +230,12 @@ export default function App() {
   useEffect(() => { if (loaded) saveData(KEYS.rosters,    rosters);    }, [rosters,    loaded]);
   useEffect(() => { if (loaded) saveData(KEYS.deductions, deductions); }, [deductions, loaded]);
   useEffect(() => { if (loaded) saveData(KEYS.ot,         ot);         }, [ot,         loaded]);
-  useEffect(() => { if (loaded) saveData(KEYS.companies,  companies);  }, [companies,  loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.companies,    companies);    }, [companies,    loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.quotas,       quotas);       }, [quotas,       loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.requirements, requirements); }, [requirements, loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.applicants,   applicants);   }, [applicants,   loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.leaves,         leaves);         }, [leaves,         loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.leaveTimetable, leaveTimetable); }, [leaveTimetable, loaded]);
 
   // ── Auth handlers ──
   const handleLogin = (u) => {
@@ -410,11 +440,12 @@ export default function App() {
             )}
 
             {/* ── EMS ── */}
-            {page === "employees"  && <EmployeesPage  employees={employees} setEmployees={setEmployees} toast={toast} user={user} attendance={attendance} rosters={rosters} ot={ot} sites={sites} deductions={deductions} />}
+            {page === "employees"  && <EmployeesPage  employees={employees} setEmployees={setEmployees} toast={toast} user={user} attendance={attendance} rosters={rosters} ot={ot} sites={sites} deductions={deductions} leaves={leaves} setLeaves={setLeaves} />}
             {page === "sites"      && <SitesPage      sites={sites} setSites={setSites} toast={toast} companies={companies} />}
             {page === "deductions" && <DeductionsPage employees={employees} deductions={deductions} setDeductions={setDeductions} toast={toast} />}
 
             {/* ── Attendance & OT ── */}
+            {page === "att-dashboard" && <AttendanceDashboard onNavigate={navigate} user={user} attendance={attendance} ot={ot} employees={employees} rosters={rosters} />}
             {page === "roster"     && <RosterPage     employees={employees} rosters={rosters} setRosters={setRosters} toast={toast} user={user} />}
             {page === "attendance" && <AttendancePage employees={employees} sites={sites} attendance={attendance} setAttendance={setAttendance} rosters={rosters} toast={toast} user={user} />}
             {page === "otentry"    && <OTEntryPage    employees={employees} sites={sites} attendance={attendance} ot={ot} setOt={setOt} rosters={rosters} toast={toast} />}
@@ -424,9 +455,15 @@ export default function App() {
             {page === "payroll"    && <PayrollPage    employees={employees} sites={sites} attendance={attendance} ot={ot} rosters={rosters} deductions={deductions} toast={toast} />}
             {page === "statistics" && <StatisticsPage employees={employees} sites={sites} attendance={attendance} ot={ot} rosters={rosters} deductions={deductions} />}
 
-            {/* ── New modules (placeholders) ── */}
-            {page === "recruitment" && <RecruitmentPage />}
-            {page === "leave"       && <LeaveManagementPage />}
+            {/* ── Recruitment ── */}
+            {page === "rec-dashboard"  && <RecruitmentDashboard quotas={quotas} requirements={requirements} applicants={applicants} onNavigate={navigate} user={user} />}
+            {page === "quota"          && <QuotaPage quotas={quotas} setQuotas={setQuotas} companies={companies} sites={sites} employees={employees} toast={toast} />}
+            {page === "requirements"   && <RequirementsPage requirements={requirements} setRequirements={setRequirements} toast={toast} />}
+            {page === "recruitment"    && <RecruitmentPage applicants={applicants} setApplicants={setApplicants} requirements={requirements} quotas={quotas} setQuotas={setQuotas} companies={companies} employees={employees} setEmployees={setEmployees} toast={toast} />}
+            {page === "leave-dashboard"  && <LeaveDashboard leaves={leaves} employees={employees} leaveTimetable={leaveTimetable} onNavigate={navigate} user={user} />}
+            {page === "leave-management" && <LeaveManagementPage leaves={leaves} setLeaves={setLeaves} employees={employees} leaveTimetable={leaveTimetable} toast={toast} user={user} />}
+            {page === "leave-timetable"  && <LeaveTimetablePage leaveTimetable={leaveTimetable} setLeaveTimetable={setLeaveTimetable} leaves={leaves} employees={employees} toast={toast} user={user} />}
+            {page === "leave-requests"   && <LeaveRequestsPage leaves={leaves} setLeaves={setLeaves} employees={employees} toast={toast} />}
             {page === "pettycash"   && <PettyCashPage />}
             {page === "permits"     && <PermitTrackingPage />}
             {page === "companies"   && <CompaniesPage companies={companies} setCompanies={setCompanies} toast={toast} />}

@@ -129,7 +129,7 @@ function StatusBadge({ status }) {
 // ════════════════════════════════════════════════════════════════
 // EMPLOYEE PROFILE
 // ════════════════════════════════════════════════════════════════
-export default function EmployeeProfile({ emp, onSave, onBack, user, attendance, rosters, ot, sites }) {
+export default function EmployeeProfile({ emp, onSave, onBack, user, attendance, rosters, ot, sites, leaves, setLeaves }) {
   const [tab, setTab]       = useState("Overview");
   const [form, setForm]     = useState({ ...emp });
   const [editing, setEditing] = useState(null); // "personal"|"contact"|"agent"|"identity"|docKey|null
@@ -220,6 +220,64 @@ export default function EmployeeProfile({ emp, onSave, onBack, user, attendance,
   }, [emp.id, attendance]);
 
   const totalLeave = leaveSummary.reduce((s, m) => s + m.L, 0);
+
+  // ── Leave Requests section state ──
+  const empLeaves = useMemo(() => (leaves || []).filter(l => l.employeeId === emp.id)
+    .sort((a, b) => (b.requestedAt || "").localeCompare(a.requestedAt || "")),
+    [leaves, emp.id]);
+
+  const [showLeaveForm,    setShowLeaveForm]    = useState(false);
+  const [leaveForm,        setLeaveForm]        = useState({ leaveType: "annual", startDate: today.toISOString().slice(0,10), endDate: today.toISOString().slice(0,10), reason: "" });
+  const setLF = (k, v) => setLeaveForm(p => ({ ...p, [k]: v }));
+  const leaveFormDays = leaveForm.startDate && leaveForm.endDate
+    ? Math.max(0, Math.ceil((new Date(leaveForm.endDate) - new Date(leaveForm.startDate)) / 86400000) + 1)
+    : 0;
+
+  const [returningLeaveId, setReturningLeaveId] = useState(null);
+  const [returnDateEmp,    setReturnDateEmp]    = useState(today.toISOString().slice(0,10));
+  const [rejectingLeaveId, setRejectingLeaveId] = useState(null);
+  const [rejectLeaveNote,  setRejectLeaveNote]  = useState("");
+
+  const submitLeaveRequest = () => {
+    if (!leaveForm.startDate || !leaveForm.endDate) return;
+    if (new Date(leaveForm.startDate) > new Date(leaveForm.endDate)) return;
+    if (!setLeaves) return;
+    setLeaves(p => [...p, {
+      id:           genId(),
+      employeeId:   emp.id,
+      employeeName: emp.name,
+      leaveType:    leaveForm.leaveType,
+      startDate:    leaveForm.startDate,
+      endDate:      leaveForm.endDate,
+      days:         leaveFormDays,
+      reason:       leaveForm.reason,
+      status:       "pending",
+      requestedAt:  today.toISOString().slice(0,10),
+      requestedBy:  user?.name || "",
+      reviewNote:   "",
+      returnedAt:   null,
+    }]);
+    setShowLeaveForm(false);
+    setLeaveForm({ leaveType: "annual", startDate: today.toISOString().slice(0,10), endDate: today.toISOString().slice(0,10), reason: "" });
+  };
+
+  const approveLeave = (id) => {
+    if (!setLeaves) return;
+    setLeaves(p => p.map(l => l.id === id ? { ...l, status: "approved" } : l));
+  };
+
+  const rejectLeave = (id) => {
+    if (!setLeaves) return;
+    setLeaves(p => p.map(l => l.id === id ? { ...l, status: "rejected", reviewNote: rejectLeaveNote } : l));
+    setRejectingLeaveId(null);
+    setRejectLeaveNote("");
+  };
+
+  const markReturned = (id) => {
+    if (!setLeaves) return;
+    setLeaves(p => p.map(l => l.id === id ? { ...l, returnedAt: returnDateEmp } : l));
+    setReturningLeaveId(null);
+  };
 
   // ── Leave days since statusDate (for employees on leave) ──
   const leaveDaysElapsed = useMemo(() => {
@@ -681,6 +739,138 @@ export default function EmployeeProfile({ emp, onSave, onBack, user, attendance,
           ════════════════════════════════════════════════════════ */}
       {tab === "Leave" && (
         <div>
+          {/* ── Leave Requests section ── */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-header">
+              <div className="card-title">Leave Requests</div>
+              {setLeaves && (
+                <button className="btn btn-primary btn-sm" onClick={() => setShowLeaveForm(p => !p)}>
+                  {showLeaveForm ? "✕ Cancel" : "+ Request Leave"}
+                </button>
+              )}
+            </div>
+            <div className="card-body">
+              {/* Add form */}
+              {showLeaveForm && (
+                <div style={{ background: "var(--surface2)", borderRadius: 10, padding: 16, marginBottom: 16, border: "1px solid var(--border)" }}>
+                  <div className="form-grid form-grid-2">
+                    <div className="form-group">
+                      <label className="form-label">Leave Type</label>
+                      <select className="form-select" value={leaveForm.leaveType} onChange={e => setLF("leaveType", e.target.value)}>
+                        <option value="annual">Annual</option>
+                        <option value="sick">Sick</option>
+                        <option value="emergency">Emergency</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                    <div />
+                    <div className="form-group">
+                      <label className="form-label">Start Date *</label>
+                      <input className="form-input" type="date" value={leaveForm.startDate} onChange={e => setLF("startDate", e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">End Date *</label>
+                      <input className="form-input" type="date" value={leaveForm.endDate} onChange={e => setLF("endDate", e.target.value)} />
+                    </div>
+                    <div className="form-group" style={{ gridColumn: "1/-1" }}>
+                      <label className="form-label">Reason</label>
+                      <textarea className="form-input" rows={2} value={leaveForm.reason} onChange={e => setLF("reason", e.target.value)} placeholder="Optional..." style={{ resize: "vertical" }} />
+                    </div>
+                  </div>
+                  {leaveFormDays > 0 && (
+                    <div style={{ fontSize: 13, color: "var(--accent)", fontWeight: 700, marginBottom: 10 }}>
+                      Duration: {leaveFormDays} day{leaveFormDays !== 1 ? "s" : ""}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn btn-primary btn-sm" onClick={submitLeaveRequest}>Submit</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setShowLeaveForm(false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Requests table */}
+              {empLeaves.length === 0 ? (
+                <div className="empty-state" style={{ padding: "20px 0" }}>
+                  <p>No leave requests for this employee.</p>
+                </div>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Type</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Days</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {empLeaves.map(l => {
+                        const TYPE_COLOR = { annual: "#06b6d4", sick: "#8b5cf6", emergency: "#ef4444", other: "#94a3b8" };
+                        const TYPE_LABEL = { annual: "Annual", sick: "Sick", emergency: "Emergency", other: "Other" };
+                        const STATUS_CLS = { pending: "badge-yellow", approved: "badge-green", rejected: "badge-red" };
+                        return (
+                          <tr key={l.id}>
+                            <td>
+                              <span style={{ color: TYPE_COLOR[l.leaveType] || "var(--text3)", fontWeight: 700, fontSize: 12 }}>
+                                {TYPE_LABEL[l.leaveType] || l.leaveType}
+                              </span>
+                            </td>
+                            <td className="text-mono" style={{ fontSize: 12 }}>{l.startDate}</td>
+                            <td className="text-mono" style={{ fontSize: 12 }}>{l.endDate}</td>
+                            <td style={{ fontWeight: 700 }}>{l.days}</td>
+                            <td>
+                              <span className={`badge ${STATUS_CLS[l.status] || "badge-gray"}`}>
+                                {l.status ? l.status.charAt(0).toUpperCase() + l.status.slice(1) : "—"}
+                              </span>
+                            </td>
+                            <td>
+                              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                                {l.status === "approved" && !l.returnedAt && setLeaves && (
+                                  returningLeaveId === l.id ? (
+                                    <>
+                                      <input className="form-input" type="date" value={returnDateEmp} onChange={e => setReturnDateEmp(e.target.value)} style={{ width: 130, padding: "3px 7px", fontSize: 12 }} />
+                                      <button className="btn btn-primary btn-sm" onClick={() => markReturned(l.id)}>Confirm</button>
+                                      <button className="btn btn-ghost btn-sm" onClick={() => setReturningLeaveId(null)}>✕</button>
+                                    </>
+                                  ) : (
+                                    <button className="btn btn-ghost btn-sm" onClick={() => { setReturningLeaveId(l.id); setReturnDateEmp(today.toISOString().slice(0,10)); }}>
+                                      Mark Returned
+                                    </button>
+                                  )
+                                )}
+                                {l.status === "approved" && l.returnedAt && (
+                                  <span style={{ fontSize: 11, color: "var(--text3)" }}>Returned {l.returnedAt}</span>
+                                )}
+                                {isManager && l.status === "pending" && setLeaves && (
+                                  rejectingLeaveId === l.id ? (
+                                    <>
+                                      <input className="form-input" placeholder="Note..." value={rejectLeaveNote} onChange={e => setRejectLeaveNote(e.target.value)} style={{ width: 150, padding: "3px 7px", fontSize: 12 }} />
+                                      <button className="btn btn-danger btn-sm" onClick={() => rejectLeave(l.id)}>Confirm</button>
+                                      <button className="btn btn-ghost btn-sm" onClick={() => setRejectingLeaveId(null)}>✕</button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button className="btn btn-sm" style={{ background: "#10b981", borderColor: "#10b981", color: "#fff" }} onClick={() => approveLeave(l.id)}>✓</button>
+                                      <button className="btn btn-danger btn-sm" onClick={() => { setRejectingLeaveId(l.id); setRejectLeaveNote(""); }}>✗</button>
+                                    </>
+                                  )
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+
           {emp.empStatus === "leave" && (
             <div className="alert alert-warning" style={{ marginBottom: 16 }}>
               <span>🏖</span>

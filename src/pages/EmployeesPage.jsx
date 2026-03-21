@@ -280,7 +280,7 @@ export function QuickStatusModal({ emp, onSave, onClose }) {
   );
 }
 
-export default function EmployeesPage({ employees, setEmployees, toast, user, attendance, rosters, ot, sites, deductions }) {
+export default function EmployeesPage({ employees, setEmployees, toast, user, attendance, rosters, ot, sites, deductions, leaves, setLeaves }) {
   const isManager = user?.role === "manager";
   const [selectedEmp, setSelectedEmp] = useState(null); // employee obj | null
   const [modal, setModal]             = useState(null);  // "new" | null (add only)
@@ -299,6 +299,8 @@ export default function EmployeesPage({ employees, setEmployees, toast, user, at
         ot={ot}
         sites={sites}
         deductions={deductions}
+        leaves={leaves || []}
+        setLeaves={setLeaves}
         onSave={updated => {
           setEmployees(p => p.map(e => e.id === updated.id ? updated : e));
           setSelectedEmp(updated);
@@ -338,7 +340,7 @@ export default function EmployeesPage({ employees, setEmployees, toast, user, at
 
       <div className="flex-between mb-4">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <input className="form-input" style={{ width: 240 }} placeholder="Search name / ID..." value={filter} onChange={e => setFilter(e.target.value)} />
+          <input className="form-input" style={{ width: "min(240px, 100%)" }} placeholder="Search name / ID..." value={filter} onChange={e => setFilter(e.target.value)} />
           {!isManager && <span className="badge badge-blue" style={{ fontSize: 11 }}>👁 View Only</span>}
         </div>
         {isManager && <button className="btn btn-primary" onClick={() => setModal("new")}>+ Add Employee</button>}

@@ -256,17 +256,20 @@ tr:last-child td { border-bottom: none; }
 .role-supervisor { background: rgba(59,130,246,0.15); color: #3b82f6; }
 
 /* ── RESPONSIVE ── */
-@media (max-width: 900px) {
+
+/* ── Laptop  769px–1024px ── */
+@media (max-width: 1024px) {
   :root { --sidebar-w: 220px; }
-  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .form-grid-3 { grid-template-columns: 1fr 1fr; }
-  .page-content { padding: 16px; }
-  .page-header { padding: 16px; }
+  .page-content { padding: 16px 20px; }
+  .page-header { padding: 16px 20px; }
+  .page-title { font-size: 17px; }
 }
 
-@media (max-width: 640px) {
-  :root { --sidebar-w: 260px; }
-  /* sidebar hidden off-screen on mobile */
+/* ── Tablet  481px–768px  – sidebar slides off-screen ── */
+@media (max-width: 768px) {
+  :root { --sidebar-w: 268px; }
   .sidebar { transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); box-shadow: 4px 0 24px rgba(0,0,0,0.5); }
   .sidebar-close { display: block; }
@@ -274,26 +277,85 @@ tr:last-child td { border-bottom: none; }
   .main { margin-left: 0; }
   .topbar { display: flex; }
   .page-header { display: none; }
-  .stats-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
-  .form-grid-2, .form-grid-3 { grid-template-columns: 1fr; }
-  .page-content { padding: 12px; }
-  .btn { font-size: 12px; padding: 7px 12px; }
-  .modal { border-radius: 12px; }
-  .modal-body { padding: 16px; }
-  td, th { padding: 8px 10px; }
-  .payslip-row { padding: 7px 14px; font-size: 12px; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .form-grid-3 { grid-template-columns: 1fr 1fr; }
+  .page-content { padding: 14px; }
+  .modal { max-width: 96vw; }
+  .card-body { padding: 14px 16px; }
+  .page-content .module-card { padding: 16px 18px; }
 }
 
+/* ── Mobile  320px–480px ── */
+@media (max-width: 480px) {
+  .stats-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat-card { padding: 11px 12px; }
+  .stat-value { font-size: 20px; }
+  .stat-label { font-size: 9px; }
+  .form-grid-2, .form-grid-3 { grid-template-columns: 1fr; }
+  .page-content { padding: 10px; }
+  .card-body { padding: 11px 13px; }
+  .card-header { padding: 10px 13px; }
+  .btn { font-size: 12px; padding: 7px 11px; }
+  .btn-sm { font-size: 10px; padding: 4px 8px; }
+  .modal { border-radius: 12px; }
+  .modal-body { padding: 13px; }
+  .modal-header { padding: 14px 16px; }
+  .modal-footer { padding: 11px 13px; gap: 8px; }
+  td { font-size: 12px; padding: 8px 8px; }
+  th { font-size: 9px; padding: 8px 8px; }
+  .payslip-row { padding: 7px 12px; font-size: 12px; }
+  .badge { font-size: 9px; padding: 2px 6px; }
+  .page-title { font-size: 15px; }
+  .toast { font-size: 12px; padding: 9px 12px; max-width: 280px; }
+  .alert { font-size: 12px; padding: 9px 12px; }
+}
+
+/* ── Extra-small  ≤ 380px ── */
 @media (max-width: 380px) {
   .stats-grid { grid-template-columns: 1fr; }
+  .gap-2, .gap-3 { flex-wrap: wrap; }
   .att-status { gap: 3px; }
   .att-btn { padding: 3px 6px; font-size: 9px; }
+  .btn-sm { padding: 3px 7px; }
 }
 
-/* ── HR Dashboard ── */
+/* ── HR Dashboard module cards ── */
 .module-card { outline: none; }
 .module-card:focus-visible { outline: 2px solid var(--accent); }
 
-@media (max-width: 640px) {
-  .page-content .module-card { padding: 16px 18px; }
+/* ── Utility: flexible search/filter row ── */
+.filter-row {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px;
+}
+.filter-row .form-input,
+.filter-row .form-select { min-width: 120px; flex: 1 1 140px; max-width: 260px; }
+@media (max-width: 480px) {
+  .filter-row { gap: 8px; }
+  .filter-row .form-input,
+  .filter-row .form-select { max-width: 100%; }
+}
+
+/* ── Ensure tables always have horizontal scroll on small screens ── */
+@media (max-width: 768px) {
+  .table-wrap { border-radius: 0; }
+  table { min-width: 480px; }
+}
+@media (max-width: 480px) {
+  table { min-width: 420px; }
+  .roster-table { min-width: unset; }  /* roster has its own scroll */
+}
+
+/* ── Modal: full-screen on mobile ── */
+@media (max-width: 480px) {
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal { border-radius: 16px 16px 0 0; max-height: 90vh; }
+}
+
+/* ── Page banner sections (gradient headers in dashboards) ── */
+@media (max-width: 480px) {
+  .dash-banner { padding: 18px 16px !important; }
+  .dash-banner-title { font-size: 17px !important; }
+  .dash-banner-stats { gap: 8px !important; }
+  .dash-banner-stat { min-width: 64px !important; padding: 8px 10px !important; }
+  .dash-banner-stat-val { font-size: 18px !important; }
 }

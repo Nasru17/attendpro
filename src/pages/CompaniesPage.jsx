@@ -7,7 +7,7 @@ const EMPTY_COMPANY = {
   name: "", registrationNo: "", gstNo: "",
   phone: "", email: "", website: "",
   address: "", city: "", country: "Maldives",
-  headerText: "", footerText: "",
+  headerImage: "", footerImage: "",
 };
 
 // ── Section wrapper ───────────────────────────────────────────
@@ -34,6 +34,74 @@ function Field({ label, value, editing, children }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Image upload section ──────────────────────────────────────
+function ImageUploadSection({ title, hint, imageKey, form, set, onSave, onCancel, editing, setEditing }) {
+  const isEditing = editing === imageKey;
+  const currentImage = form[imageKey] || "";
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => set(imageKey, ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <Section
+      title={title}
+      action={isEditing
+        ? <div className="gap-2">
+            <button className="btn btn-primary btn-sm" onClick={onSave}>Save</button>
+            <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
+          </div>
+        : <div className="gap-2">
+            <button className="btn btn-ghost btn-sm" onClick={() => setEditing(imageKey)}>
+              {currentImage ? "Change" : "Upload"}
+            </button>
+            {currentImage && (
+              <button className="btn btn-danger btn-sm" onClick={() => { set(imageKey, ""); onSave(); }}>Remove</button>
+            )}
+          </div>
+      }
+    >
+      <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 12 }}>{hint}</div>
+
+      {isEditing && (
+        <div style={{
+          border: "2px dashed var(--border)", borderRadius: 10, padding: "20px",
+          textAlign: "center", marginBottom: 12, background: "var(--surface2)",
+        }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>🖼</div>
+          <div style={{ fontSize: 13, color: "var(--text2)", marginBottom: 12 }}>
+            {currentImage ? "Replace the current image" : "Upload a PNG or JPG image"}
+          </div>
+          <label style={{
+            display: "inline-block", padding: "8px 20px", borderRadius: 8,
+            background: "var(--accent)", color: "#fff", fontSize: 13, fontWeight: 600,
+            cursor: "pointer",
+          }}>
+            Choose Image
+            <input type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
+          </label>
+          {currentImage && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 8 }}>Preview:</div>
+              <img src={currentImage} alt="preview" style={{ maxWidth: "100%", maxHeight: 160, borderRadius: 6, border: "1px solid var(--border)", objectFit: "contain" }} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {!isEditing && (
+        currentImage
+          ? <img src={currentImage} alt={imageKey} style={{ maxWidth: "100%", maxHeight: 140, borderRadius: 8, border: "1px solid var(--border)", objectFit: "contain", display: "block" }} />
+          : <div style={{ color: "var(--text3)", fontSize: 13, padding: "12px 0" }}>No image uploaded. Click Upload to add one.</div>
+      )}
+    </Section>
   );
 }
 
@@ -183,97 +251,54 @@ function CompanyProfile({ company, onSave, onBack }) {
       {tab === "Document Templates" && (
         <div>
           <div className="alert alert-info" style={{ marginBottom: 16 }}>
-            💡 These templates are used when generating <strong>offer letters, experience letters,</strong> and other company documents. Write the header and footer text exactly as it should appear — include company name, address, and any branding text.
+            💡 Upload PNG images for the <strong>header</strong> and <strong>footer</strong> of generated documents (offer letters, experience letters, etc.). Recommended: wide banner images (A4 width).
           </div>
 
-          {/* Header */}
-          <Section title="📄 Document Header"
-            action={editing === "header"
-              ? <div className="gap-2">
-                  <button className="btn btn-primary btn-sm" onClick={saveSection}>Save</button>
-                  <button className="btn btn-ghost btn-sm" onClick={cancelEdit}>Cancel</button>
-                </div>
-              : <button className="btn btn-ghost btn-sm" onClick={() => setEditing("header")}>Edit</button>
-            }>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10 }}>
-              Appears at the <strong>top</strong> of every generated document. Include company name, address, registration number, and contact info.
-            </div>
-            {editing === "header" ? (
-              <textarea
-                className="form-input"
-                rows={6}
-                value={form.headerText||""}
-                onChange={e => set("headerText", e.target.value)}
-                placeholder={`Example:\n${company.name || "Company Name"}\nRegistration No: ${company.registrationNo || "XXXXXX"}\n${company.address || "Address line"}, ${company.city || "City"}, ${company.country || "Maldives"}\nTel: ${company.phone || "+960 xxx xxxx"} | Email: ${company.email || "info@company.com"}`}
-                style={{ fontFamily: "var(--mono)", fontSize: 12, resize: "vertical" }}
-              />
-            ) : (
-              <div style={{
-                background: "var(--surface2)", borderRadius: 8, padding: "14px 16px",
-                fontFamily: "var(--mono)", fontSize: 12, color: "var(--text)", lineHeight: 1.7,
-                whiteSpace: "pre-wrap", minHeight: 80, border: "1px solid var(--border)"
-              }}>
-                {form.headerText || <span style={{ color: "var(--text3)" }}>No header template set. Click Edit to add one.</span>}
-              </div>
-            )}
-          </Section>
+          {/* Header Image */}
+          <ImageUploadSection
+            title="📄 Document Header Image"
+            hint="Appears at the top of every generated document."
+            imageKey="headerImage"
+            form={form}
+            set={set}
+            onSave={saveSection}
+            onCancel={cancelEdit}
+            editing={editing}
+            setEditing={setEditing}
+          />
 
-          {/* Footer */}
-          <Section title="📋 Document Footer"
-            action={editing === "footer"
-              ? <div className="gap-2">
-                  <button className="btn btn-primary btn-sm" onClick={saveSection}>Save</button>
-                  <button className="btn btn-ghost btn-sm" onClick={cancelEdit}>Cancel</button>
-                </div>
-              : <button className="btn btn-ghost btn-sm" onClick={() => setEditing("footer")}>Edit</button>
-            }>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10 }}>
-              Appears at the <strong>bottom</strong> of every generated document. Include authorised signatory name/title, signature placeholder, and any disclaimers.
-            </div>
-            {editing === "footer" ? (
-              <textarea
-                className="form-input"
-                rows={6}
-                value={form.footerText||""}
-                onChange={e => set("footerText", e.target.value)}
-                placeholder={`Example:\nAuthorised by,\n\n_______________________\n[Name]\nHR Manager / Director\n${company.name || "Company Name"}`}
-                style={{ fontFamily: "var(--mono)", fontSize: 12, resize: "vertical" }}
-              />
-            ) : (
-              <div style={{
-                background: "var(--surface2)", borderRadius: 8, padding: "14px 16px",
-                fontFamily: "var(--mono)", fontSize: 12, color: "var(--text)", lineHeight: 1.7,
-                whiteSpace: "pre-wrap", minHeight: 80, border: "1px solid var(--border)"
-              }}>
-                {form.footerText || <span style={{ color: "var(--text3)" }}>No footer template set. Click Edit to add one.</span>}
-              </div>
-            )}
-          </Section>
+          {/* Footer Image */}
+          <ImageUploadSection
+            title="📋 Document Footer Image"
+            hint="Appears at the bottom of every generated document."
+            imageKey="footerImage"
+            form={form}
+            set={set}
+            onSave={saveSection}
+            onCancel={cancelEdit}
+            editing={editing}
+            setEditing={setEditing}
+          />
 
           {/* Preview */}
-          {(company.headerText || company.footerText) && (
+          {(form.headerImage || form.footerImage) && (
             <Section title="👁 Document Preview">
-              <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
-                {/* Header */}
-                <div style={{ background: "var(--surface2)", padding: "16px 20px", borderBottom: "2px solid var(--border)" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Header</div>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 12, whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
-                    {company.headerText || <span style={{ color: "var(--text3)" }}>—</span>}
+              <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+                {form.headerImage && (
+                  <div style={{ borderBottom: "1px solid #e5e7eb" }}>
+                    <img src={form.headerImage} alt="Header" style={{ width: "100%", display: "block" }} />
                   </div>
-                </div>
-                {/* Document body placeholder */}
-                <div style={{ padding: "20px", background: "var(--surface3)" }}>
-                  <div style={{ fontSize: 12, color: "var(--text3)", fontStyle: "italic", textAlign: "center" }}>
+                )}
+                <div style={{ padding: "24px 32px" }}>
+                  <div style={{ fontSize: 12, color: "#9ca3af", fontStyle: "italic", textAlign: "center" }}>
                     [ Document content — offer letter body, experience letter body, etc. ]
                   </div>
                 </div>
-                {/* Footer */}
-                <div style={{ background: "var(--surface2)", padding: "16px 20px", borderTop: "2px solid var(--border)" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Footer</div>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 12, whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
-                    {company.footerText || <span style={{ color: "var(--text3)" }}>—</span>}
+                {form.footerImage && (
+                  <div style={{ borderTop: "1px solid #e5e7eb" }}>
+                    <img src={form.footerImage} alt="Footer" style={{ width: "100%", display: "block" }} />
                   </div>
-                </div>
+                )}
               </div>
             </Section>
           )}
@@ -430,9 +455,9 @@ export default function CompaniesPage({ companies, setCompanies, toast }) {
 
                 {/* Badges */}
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {co.headerText && <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Header</span>}
-                  {co.footerText && <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Footer</span>}
-                  {!co.headerText && !co.footerText && <span className="badge badge-gray" style={{ fontSize: 10 }}>No templates</span>}
+                  {co.headerImage && <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Header</span>}
+                  {co.footerImage && <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Footer</span>}
+                  {!co.headerImage && !co.footerImage && <span className="badge badge-gray" style={{ fontSize: 10 }}>No templates</span>}
                 </div>
 
                 {/* Footer row */}
