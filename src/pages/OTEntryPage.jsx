@@ -4,7 +4,10 @@ import { genId, getDayName, getDaysInMonth, isFriday } from "../utils/helpers";
 import StepBreadcrumb from "../components/StepBreadcrumb";
 import OTStepper from "../components/OTStepper";
 
+const ACTIVE_STATUSES = new Set(["active", "retention"]);
+
 export default function OTEntryPage({ employees, sites, attendance, ot, setOt, rosters, toast }) {
+  const activeSites = sites.filter(s => ACTIVE_STATUSES.has(s.status || "active"));
   const todayStr = new Date().toISOString().slice(0, 10);
   const [step, setStep] = useState("date");
   const [date, setDate] = useState(todayStr);
@@ -139,7 +142,7 @@ export default function OTEntryPage({ employees, sites, attendance, ot, setOt, r
         <div className="card-body">
           <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 14 }}>{dayName}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {sites.map(s => {
+            {activeSites.map(s => {
               const existingCount = Object.keys((ot[date] || {})[s.id] || {}).length;
               return (
                 <div key={s.id} onClick={() => goToStaff(s.id)}

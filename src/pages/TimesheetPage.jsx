@@ -3,7 +3,10 @@ import { getDaysInMonth, getDayName, isFriday } from "../utils/helpers";
 import { isEmpActiveOnDate } from "../constants/employees";
 import { downloadAttendanceExcel } from "../utils/excel";
 
+const ACTIVE_STATUSES = new Set(["active", "retention"]);
+
 export default function TimesheetPage({ employees, sites, attendance, setAttendance, rosters, toast }) {
+  const activeSites = sites.filter(s => ACTIVE_STATUSES.has(s.status || "active"));
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -105,7 +108,7 @@ export default function TimesheetPage({ employees, sites, attendance, setAttenda
               <label className="form-label">Filter by Site</label>
               <select className="form-select" value={siteId} onChange={e => setSiteId(e.target.value)}>
                 <option value="">All Sites</option>
-                {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {activeSites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div className="form-group">

@@ -7,6 +7,7 @@ const EMPTY_COMPANY = {
   name: "", registrationNo: "", gstNo: "",
   phone: "", email: "", website: "",
   address: "", city: "", country: "Maldives",
+  logo: "",
   headerImage: "", footerImage: "",
 };
 
@@ -132,13 +133,19 @@ function CompanyProfile({ company, onSave, onBack }) {
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-body" style={{ padding: "24px 28px" }}>
           <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
-            {/* Avatar */}
+            {/* Logo / Avatar */}
             <div style={{
               width: 64, height: 64, borderRadius: 14, flexShrink: 0,
               background: "#3b82f618", color: "#3b82f6",
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 22, fontWeight: 800, border: "2px solid #3b82f644",
-            }}>{initials(company.name)}</div>
+              overflow: "hidden",
+            }}>
+              {company.logo
+                ? <img src={company.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                : initials(company.name)
+              }
+            </div>
 
             {/* Info */}
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -198,6 +205,57 @@ function CompanyProfile({ company, onSave, onBack }) {
                 <input className="form-input" value={form.website||""} onChange={e => set("website", e.target.value)} placeholder="www.example.com" />
               </Field>
             </div>
+          </Section>
+
+          {/* Logo */}
+          <Section title="🖼 Company Logo"
+            action={editing === "logo"
+              ? <div className="gap-2">
+                  <button className="btn btn-primary btn-sm" onClick={saveSection}>Save</button>
+                  <button className="btn btn-ghost btn-sm" onClick={cancelEdit}>Cancel</button>
+                </div>
+              : <div className="gap-2">
+                  <button className="btn btn-ghost btn-sm" onClick={() => setEditing("logo")}>
+                    {form.logo ? "Change" : "Upload"}
+                  </button>
+                  {form.logo && (
+                    <button className="btn btn-danger btn-sm" onClick={() => { set("logo", ""); onSave({ ...form, logo: "" }); }}>Remove</button>
+                  )}
+                </div>
+            }>
+            <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 12 }}>
+              Shown on the company card and profile. Recommended: square PNG with transparent background.
+            </div>
+            {editing === "logo" ? (
+              <div style={{ border: "2px dashed var(--border)", borderRadius: 10, padding: "20px", textAlign: "center", background: "var(--surface2)" }}>
+                <div style={{ fontSize: 28, marginBottom: 8 }}>🖼</div>
+                <div style={{ fontSize: 13, color: "var(--text2)", marginBottom: 12 }}>
+                  {form.logo ? "Replace the current logo" : "Upload company logo"}
+                </div>
+                <label style={{ display: "inline-block", padding: "8px 20px", borderRadius: 8, background: "var(--accent)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                  Choose Image
+                  <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = ev => set("logo", ev.target.result);
+                    reader.readAsDataURL(file);
+                  }} />
+                </label>
+                {form.logo && (
+                  <div style={{ marginTop: 16 }}>
+                    <img src={form.logo} alt="logo preview" style={{ width: 80, height: 80, objectFit: "contain", borderRadius: 10, border: "1px solid var(--border)", background: "#fff", padding: 8 }} />
+                  </div>
+                )}
+              </div>
+            ) : (
+              form.logo
+                ? <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                    <img src={form.logo} alt="logo" style={{ width: 72, height: 72, objectFit: "contain", borderRadius: 10, border: "1px solid var(--border)", background: "#fff", padding: 8 }} />
+                    <span style={{ fontSize: 12, color: "var(--text3)" }}>Logo uploaded</span>
+                  </div>
+                : <div style={{ color: "var(--text3)", fontSize: 13, padding: "8px 0" }}>No logo uploaded. Click Upload to add one.</div>
+            )}
           </Section>
 
           {/* Contact */}
@@ -434,8 +492,12 @@ export default function CompaniesPage({ companies, setCompanies, toast }) {
                     background: "#3b82f618", color: "#3b82f6",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontSize: 16, fontWeight: 800, border: "1.5px solid #3b82f633",
+                    overflow: "hidden",
                   }}>
-                    {(co.name || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
+                    {co.logo
+                      ? <img src={co.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain", padding: 4 }} />
+                      : (co.name || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()
+                    }
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{co.name}</div>

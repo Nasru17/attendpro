@@ -53,7 +53,6 @@ export const MODULE_DEFS = [
     roles: ["manager", "supervisor"],
     pages: [
       { id: "employees",  icon: "👤", label: "Employees",  roles: ["manager", "supervisor"] },
-      { id: "sites",      icon: "🏗", label: "Work Sites", roles: ["manager"] },
       { id: "deductions", icon: "💳", label: "Deductions", roles: ["manager"] },
     ],
   },
@@ -118,6 +117,7 @@ export const MODULE_DEFS = [
     roles: ["manager"],
     pages: [
       { id: "companies", icon: "🏢", label: "Companies",       roles: ["manager"] },
+      { id: "sites",     icon: "🏗", label: "Work Sites",      roles: ["manager"] },
       { id: "permits",   icon: "📋", label: "Permit Tracking", roles: ["manager"] },
     ],
   },

@@ -4,8 +4,15 @@ import { isEmpActiveOnDate, EMP_STATUS_META } from "../constants/employees";
 import { genId } from "../utils/helpers";
 import StepBreadcrumb from "../components/StepBreadcrumb";
 
+// Only show sites that are active or in retention — others are not accepting attendance
+const ACTIVE_STATUSES = new Set(["active", "retention"]);
+function getActiveSites(sites) {
+  return sites.filter(s => ACTIVE_STATUSES.has(s.status || "active"));
+}
+
 export default function AttendancePage({ employees, sites, attendance, setAttendance, rosters, toast, user }) {
   const isManager = user?.role === "manager";
+  const activeSites = getActiveSites(sites);
   const todayStr = new Date().toISOString().slice(0, 10);
   const [step, setStep] = useState("date");
   const [date, setDate] = useState(todayStr);
@@ -98,7 +105,7 @@ export default function AttendancePage({ employees, sites, attendance, setAttend
               <label className="form-label">Site</label>
               <select className="form-select" value={bulkSiteId} onChange={e => setBulkSiteId(e.target.value)}>
                 <option value="">Select site...</option>
-                {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {activeSites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div className="form-group">
