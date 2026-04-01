@@ -177,15 +177,20 @@ export default function TimesheetPage({ employees, sites, attendance, setAttenda
                       </td>
                       {Array.from({ length: days }, (_, i) => {
                         const d = i + 1;
+                        const dk2 = `${monthKey}-${String(d).padStart(2,"0")}`;
                         const a = getAtt(e.id, d);
                         const rType = roster[e.id]?.[d] || (isFriday(year,month,d) ? "H" : "W");
                         if (a?.status && counts[a.status] !== undefined) counts[a.status]++;
                         const isHoliday = rType === "H" && !a;
                         const isOff = rType === "O" && !a;
+                        const empSt = e.empStatus || "active";
+                        const isLocked = !a && empSt !== "active" && !isEmpActiveOnDate(e, dk2);
+                        const lockedLabel = empSt === "leave" ? "LV" : empSt === "resigned" ? "RS" : empSt === "fled" ? "FL" : null;
                         return (
-                          <td key={d} style={{ padding:2, cursor:"pointer", textAlign:"center" }} onClick={() => startEdit(e.id, d)}>
+                          <td key={d} style={{ padding:2, cursor: isLocked ? "default" : "pointer", textAlign:"center" }} onClick={() => !isLocked && startEdit(e.id, d)}>
                             {a
                               ? <span className={`badge ${statusColors[a.status]||"badge-gray"}`} style={{ fontSize:9, padding:"1px 4px" }}>{a.status}</span>
+                              : isLocked && lockedLabel ? <span style={{ color:"#f59e0b", fontSize:9, fontWeight:700 }}>{lockedLabel}</span>
                               : isHoliday ? <span style={{ color:"#06b6d4", fontSize:9 }}>PH</span>
                               : isOff ? <span style={{ color:"#64748b", fontSize:9 }}>OFF</span>
                               : <span style={{ color:"var(--text3)", fontSize:10 }}>—</span>}

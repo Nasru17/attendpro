@@ -280,7 +280,7 @@ export function QuickStatusModal({ emp, onSave, onClose }) {
   );
 }
 
-export default function EmployeesPage({ employees, setEmployees, toast, user, attendance, rosters, ot, sites, deductions, leaves, setLeaves }) {
+export default function EmployeesPage({ employees, setEmployees, toast, user, attendance, rosters, ot, sites, deductions, leaves, setLeaves, payroll = {} }) {
   const isManager = user?.role === "manager";
   const [selectedEmp, setSelectedEmp] = useState(null); // employee obj | null
   const [modal, setModal]             = useState(null);  // "new" | null (add only)
@@ -301,6 +301,7 @@ export default function EmployeesPage({ employees, setEmployees, toast, user, at
         deductions={deductions}
         leaves={leaves || []}
         setLeaves={setLeaves}
+        payroll={payroll}
         onSave={updated => {
           setEmployees(p => p.map(e => e.id === updated.id ? updated : e));
           setSelectedEmp(updated);

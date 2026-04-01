@@ -144,6 +144,7 @@ export default function App() {
   const [rosters, setRosters]         = useState({});
   const [deductions, setDeductions]   = useState({});
   const [companies, setCompanies]     = useState([]);
+  const [payroll, setPayroll]         = useState({});
   const [quotas, setQuotas]           = useState([]);
   const [requirements, setRequirements] = useState([]);
   const [applicants, setApplicants]   = useState([]);
@@ -185,11 +186,12 @@ export default function App() {
           localStorage.removeItem("att:session");
         }
       }
-      const [e, s, a, r, d, o, co, qu, rq, ap, lv, lt] = await Promise.all([
+      const [e, s, a, r, d, o, co, py, qu, rq, ap, lv, lt] = await Promise.all([
         load(KEYS.employees), load(KEYS.sites),    load(KEYS.attendance),
         load(KEYS.rosters),   load(KEYS.deductions), load(KEYS.ot),
-        load(KEYS.companies), load(KEYS.quotas),   load(KEYS.requirements),
-        load(KEYS.applicants), load(KEYS.leaves),  load(KEYS.leaveTimetable),
+        load(KEYS.companies), load(KEYS.payroll),  load(KEYS.quotas),
+        load(KEYS.requirements), load(KEYS.applicants), load(KEYS.leaves),
+        load(KEYS.leaveTimetable),
       ]);
       if (e)  setEmployees(e);
       if (s)  setSites(s);
@@ -198,6 +200,7 @@ export default function App() {
       if (d)  setDeductions(d);
       if (o)  setOt(o);
       if (co) setCompanies(co);
+      if (py) setPayroll(py);
       if (qu) setQuotas(qu);
       if (rq) setRequirements(rq);
       if (ap) setApplicants(ap);
@@ -231,6 +234,7 @@ export default function App() {
   useEffect(() => { if (loaded) saveData(KEYS.deductions, deductions); }, [deductions, loaded]);
   useEffect(() => { if (loaded) saveData(KEYS.ot,         ot);         }, [ot,         loaded]);
   useEffect(() => { if (loaded) saveData(KEYS.companies,    companies);    }, [companies,    loaded]);
+  useEffect(() => { if (loaded) saveData(KEYS.payroll,      payroll);      }, [payroll,      loaded]);
   useEffect(() => { if (loaded) saveData(KEYS.quotas,       quotas);       }, [quotas,       loaded]);
   useEffect(() => { if (loaded) saveData(KEYS.requirements, requirements); }, [requirements, loaded]);
   useEffect(() => { if (loaded) saveData(KEYS.applicants,   applicants);   }, [applicants,   loaded]);
@@ -297,9 +301,12 @@ export default function App() {
         <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
           {/* Logo */}
           <div className="sidebar-logo">
-            <div>
-              <div>Attend<span>Pro</span></div>
-              <div className="sub">Alitho Construction</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <img src="/alitho-logo.png" alt="Alitho" style={{ height: 36, width: 36, objectFit: "contain", borderRadius: 6, background: "#fff", padding: 2 }} />
+              <div>
+                <div>Attend<span>Pro</span></div>
+                <div className="sub">Alitho Construction</div>
+              </div>
             </div>
             <button className="sidebar-close" onClick={closeSidebar}>✕</button>
           </div>
@@ -440,7 +447,7 @@ export default function App() {
             )}
 
             {/* ── EMS ── */}
-            {page === "employees"  && <EmployeesPage  employees={employees} setEmployees={setEmployees} toast={toast} user={user} attendance={attendance} rosters={rosters} ot={ot} sites={sites} deductions={deductions} leaves={leaves} setLeaves={setLeaves} />}
+            {page === "employees"  && <EmployeesPage  employees={employees} setEmployees={setEmployees} toast={toast} user={user} attendance={attendance} rosters={rosters} ot={ot} sites={sites} deductions={deductions} leaves={leaves} setLeaves={setLeaves} payroll={payroll} />}
             {page === "sites"      && <SitesPage      sites={sites} setSites={setSites} toast={toast} companies={companies} />}
             {page === "deductions" && <DeductionsPage employees={employees} deductions={deductions} setDeductions={setDeductions} toast={toast} />}
 
@@ -452,7 +459,7 @@ export default function App() {
             {page === "timesheet"  && <TimesheetPage  employees={employees} sites={sites} attendance={attendance} setAttendance={setAttendance} rosters={rosters} toast={toast} />}
 
             {/* ── Payroll ── */}
-            {page === "payroll"    && <PayrollPage    employees={employees} sites={sites} attendance={attendance} ot={ot} rosters={rosters} deductions={deductions} toast={toast} />}
+            {page === "payroll"    && <PayrollPage    employees={employees} sites={sites} attendance={attendance} ot={ot} rosters={rosters} deductions={deductions} payroll={payroll} setPayroll={setPayroll} toast={toast} />}
             {page === "statistics" && <StatisticsPage employees={employees} sites={sites} attendance={attendance} ot={ot} rosters={rosters} deductions={deductions} />}
 
             {/* ── Recruitment ── */}

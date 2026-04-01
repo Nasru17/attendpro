@@ -129,7 +129,7 @@ function StatusBadge({ status }) {
 // ════════════════════════════════════════════════════════════════
 // EMPLOYEE PROFILE
 // ════════════════════════════════════════════════════════════════
-export default function EmployeeProfile({ emp, onSave, onBack, user, attendance, rosters, ot, sites, leaves, setLeaves }) {
+export default function EmployeeProfile({ emp, onSave, onBack, user, attendance, rosters, ot, sites, leaves, setLeaves, payroll = {} }) {
   const [tab, setTab]       = useState("Overview");
   const [form, setForm]     = useState({ ...emp });
   const [editing, setEditing] = useState(null); // "personal"|"contact"|"agent"|"identity"|docKey|null
@@ -182,6 +182,9 @@ export default function EmployeeProfile({ emp, onSave, onBack, user, attendance,
   // ── Salary history ──
   const [showAddSalary, setShowAddSalary] = useState(false);
   const [salaryEntry, setSalaryEntry] = useState({ effectiveDate:"", basicSalary:"", attendanceAllowance:"", accommodationAllowance:"", foodAllowance:"", phoneAllowance:"" });
+
+  // ── Saved pay slips ──
+  const [viewSlip, setViewSlip] = useState(null);
 
   const addSalaryEntry = () => {
     if (!salaryEntry.effectiveDate) return;
@@ -1013,6 +1016,140 @@ export default function EmployeeProfile({ emp, onSave, onBack, user, attendance,
                     </div>
                 }
               </Section>
+
+              {/* Saved Pay Slips */}
+              {(() => {
+                const savedSlips = Object.entries(payroll)
+                  .filter(([mk, monthData]) => monthData[emp.id])
+                  .map(([mk, monthData]) => ({ monthKey: mk, ...monthData[emp.id] }))
+                  .sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+                return (
+                  <Section title="📋 Saved Pay Slips">
+                    {savedSlips.length === 0
+                      ? <div style={{ fontSize:12, color:"var(--text3)" }}>No saved pay slips yet. Slips are saved from the Payroll module.</div>
+                      : <div className="table-wrap">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Month</th>
+                                <th>Saved At</th>
+                                <th>Net Pay</th>
+                                <th>Payments</th>
+                                <th></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {savedSlips.map(slip => {
+                                const totalPaid = (slip.payments||[]).reduce((s,p) => s + Number(p.amount||0), 0);
+                                const netPay = slip.data?.netPay || 0;
+                                const paidPct = netPay > 0 ? Math.round(totalPaid / netPay * 100) : 0;
+                                return (
+                                  <tr key={slip.monthKey}>
+                                    <td style={{ fontWeight:600 }}>{slip.monthKey}</td>
+                                    <td style={{ fontSize:11, color:"var(--text3)" }}>{slip.savedAt ? new Date(slip.savedAt).toLocaleDateString() : "—"}</td>
+                                    <td className="text-mono" style={{ color:"var(--success)", fontWeight:700 }}>{mvr(netPay)}</td>
+                                    <td>
+                                      {(slip.payments||[]).length > 0
+                                        ? <span className={`badge ${paidPct >= 100 ? "badge-green" : "badge-yellow"}`}>
+                                            {mvr(totalPaid)} / {mvr(netPay)} ({paidPct}%)
+                                          </span>
+                                        : <span className="badge badge-red">Unpaid</span>
+                                      }
+                                    </td>
+                                    <td>
+                                      <button className="btn btn-ghost btn-sm" onClick={() => setViewSlip(slip)}>View</button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                    }
+                  </Section>
+                );
+              })()}
+
+              {/* Pay slip view modal */}
+              {viewSlip && (
+                <div className="modal-overlay">
+                  <div className="modal" style={{ maxWidth:520 }}>
+                    <div className="modal-header">
+                      <div className="modal-title">Pay Slip — {viewSlip.monthKey}</div>
+                      <button className="modal-close" onClick={() => setViewSlip(null)}>✕</button>
+                    </div>
+                    <div className="modal-body">
+                      <div className="payslip">
+                        <div className="payslip-header">
+                          <div style={{ display:"flex", justifyContent:"center", marginBottom:12 }}>
+                            <img src="/alitho-logo-r.png" alt="Alitho" style={{ height:60, objectFit:"contain" }} />
+                          </div>
+                          <div style={{ fontWeight:700, fontSize:16 }}>{viewSlip.empName}</div>
+                          <div style={{ fontSize:12, color:"#94a3b8", marginTop:4 }}>{viewSlip.empId} · {viewSlip.monthKey}</div>
+                          <div style={{ fontSize:12, color:"#94a3b8", marginTop:2 }}>Saved: {viewSlip.savedAt ? new Date(viewSlip.savedAt).toLocaleString() : "—"}</div>
+                        </div>
+                        <div style={{ padding:"12px 0" }}>
+                          {viewSlip.data && [
+                            ["Basic Earned",       viewSlip.data.basicEarned],
+                            ["Attendance Allow.",  viewSlip.data.attendanceAllow],
+                            ["Food Allowance",     viewSlip.data.foodAllow],
+                            ["Tea Allowance",      viewSlip.data.teaAllow],
+                            ["Phone Allowance",    viewSlip.data.phoneAllow],
+                            ["Accommodation",      viewSlip.data.accommodationAllow],
+                            ["OT (General)",       viewSlip.data.genOTAmount],
+                            ["OT (Concrete)",      viewSlip.data.concreteOTAmount],
+                            ["OT (Cement)",        viewSlip.data.cementOTAmount],
+                            ...(viewSlip.data.bonusAmount > 0 ? [[viewSlip.data.bonusName||"Bonus", viewSlip.data.bonusAmount]] : []),
+                          ].filter(r => r[1] > 0).map(([l,v]) => (
+                            <div key={l} className="payslip-row">
+                              <div>{l}</div>
+                              <div className="amount" style={{ color:"var(--success)" }}>{mvr(v)}</div>
+                            </div>
+                          ))}
+                          <div className="payslip-row total">
+                            <div>Gross Earnings</div>
+                            <div className="amount" style={{ color:"var(--success)" }}>{mvr(viewSlip.data?.grossEarnings||0)}</div>
+                          </div>
+                          {viewSlip.data && [
+                            ["Late Deduction",   viewSlip.data.lateDeduct],
+                            ["Utility",          viewSlip.data.utilityDeduct],
+                            ["Advance",          viewSlip.data.advanceDeduct],
+                            ["Loan Installment", viewSlip.data.loanDeduct],
+                          ].filter(r => r[1] > 0).map(([l,v]) => (
+                            <div key={l} className="payslip-row deduct">
+                              <div>{l}</div>
+                              <div className="amount">- {mvr(v)}</div>
+                            </div>
+                          ))}
+                          <div className="payslip-row total" style={{ background:"rgba(16,185,129,0.1)", fontSize:16 }}>
+                            <div style={{ fontWeight:800 }}>NET PAY</div>
+                            <div className="amount" style={{ color:"var(--success)", fontSize:18 }}>{mvr(viewSlip.data?.netPay||0)}</div>
+                          </div>
+                          {(viewSlip.payments||[]).length > 0 && (
+                            <div style={{ padding:"10px 20px" }}>
+                              <div style={{ fontSize:11, fontWeight:700, color:"var(--text3)", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Payments</div>
+                              {viewSlip.payments.map(pmt => (
+                                <div key={pmt.id} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:"1px solid var(--border)", fontSize:13 }}>
+                                  <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                                    <span className="badge badge-blue" style={{ fontSize:10 }}>{pmt.type}</span>
+                                    <span style={{ color:"var(--text3)", fontSize:11 }}>{pmt.date}</span>
+                                    {pmt.note && <span style={{ color:"var(--text3)", fontSize:11 }}>{pmt.note}</span>}
+                                  </div>
+                                  <span className="text-mono" style={{ color:"var(--success)", fontWeight:600 }}>{mvr(pmt.amount)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="modal-footer">
+                      <button className="btn btn-ghost" onClick={() => setViewSlip(null)}>Close</button>
+                      <button className="btn btn-primary" onClick={() => window.print()}>🖨 Print</button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="alert alert-info">
                 💡 Full salary slips and payroll calculations are available in the <strong>Payroll</strong> module.
